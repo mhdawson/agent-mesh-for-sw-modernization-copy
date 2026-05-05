@@ -1,4 +1,3 @@
-
 ** WORK IN PROGRESS - NOT READY FOR USE **
 
 NOTES/QUESTIONS:
@@ -296,5 +295,4 @@ The parquet files produced by indexing are:
 * **Product:** OpenShift AI
 * **Use case:** Agentic software and system modernization
 * **Contributor org:** Red Hat
-
 

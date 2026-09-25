@@ -4,7 +4,7 @@ apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
   name: {{ include "agent-mesh.imageStreamName" (dict "root" . "base" .Values.imageStreams.names.dataGeneration) }}
-  namespace: {{ .Values.imageStreams.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/created-by: "byon"
     app.kubernetes.io/part-of: agent-mesh-for-sw
@@ -37,7 +37,7 @@ apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
   name: {{ include "agent-mesh.imageStreamName" (dict "root" . "base" .Values.imageStreams.names.graphrag) }}
-  namespace: {{ .Values.imageStreams.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/created-by: "byon"
     app.kubernetes.io/part-of: agent-mesh-for-sw
@@ -70,7 +70,7 @@ apiVersion: image.openshift.io/v1
 kind: ImageStream
 metadata:
   name: {{ include "agent-mesh.imageStreamName" (dict "root" . "base" .Values.imageStreams.names.analysis) }}
-  namespace: {{ .Values.imageStreams.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/created-by: "byon"
     app.kubernetes.io/part-of: agent-mesh-for-sw

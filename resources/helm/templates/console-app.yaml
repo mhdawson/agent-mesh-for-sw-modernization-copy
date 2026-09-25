@@ -35,7 +35,7 @@ spec:
             - name: AGENTMESH_REPO_REF
               value: "{{ .Values.repoRef }}"
             - name: AGENTMESH_JOB_REPO_REF
-              value: "main"
+              value: "{{ .Values.repoRef }}"
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: INDEX_WORKSPACE_MAX_BYTES

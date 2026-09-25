@@ -61,6 +61,8 @@ class QueryRequest(BaseModel):
     question: str
     git_repo: str = ""
     git_branch: str = "main"
+    git_slug: str = ""
+    multi_repo: bool = False
     use_global: bool | None = None
 
 
@@ -221,10 +223,20 @@ def start_pipeline(body: PipelineRequest) -> dict[str, str]:
 @app.post("/api/query")
 def start_query(body: QueryRequest) -> dict[str, str]:
     try:
+        if body.git_slug:
+            available_uploaded_slugs = {
+                item.get("git_slug")
+                for item in (indexes.list_indexed_repos().get("indexes") or [])
+                if item.get("uploaded") and not item.get("multi_repo")
+            }
+            if body.git_slug not in available_uploaded_slugs:
+                raise ValueError("The selected uploaded index is no longer available.")
         return cluster.submit_adhoc_query(
             body.question,
             git_repo=body.git_repo,
             git_branch=body.git_branch,
+            git_slug=body.git_slug,
+            multi_repo=body.multi_repo,
             use_global=body.use_global,
         )
     except ValueError as exc:

@@ -243,12 +243,14 @@ def queryable_repos(
     indexes: list[dict[str, Any]],
     catalog: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
-    """Catalog entries that have a GraphRAG index, plus optional multi-repo index."""
+    """Catalog repositories and uploaded indexes that can be queried."""
     from catalog import repo_key
 
     options: list[dict[str, Any]] = []
+    catalog_index_slugs: set[str] = set()
     for item in catalog:
         if repo_is_indexed(item["git_repo"], item["git_branch"], indexes):
+            catalog_index_slugs.add(git_slug(item["git_repo"], item["git_branch"]))
             short = item["git_repo"].rsplit("/", 1)[-1]
             options.append(
                 {
@@ -258,6 +260,31 @@ def queryable_repos(
                     "use_global": False,
                 }
             )
+
+    seen_uploaded_slugs: set[str] = set()
+    for item in indexes:
+        slug = str(item.get("git_slug") or "").strip()
+        if (
+            not item.get("uploaded")
+            or item.get("multi_repo")
+            or not slug
+            or slug in catalog_index_slugs
+            or slug in seen_uploaded_slugs
+        ):
+            continue
+        seen_uploaded_slugs.add(slug)
+        options.append(
+            {
+                "git_repo": "",
+                "git_branch": "",
+                "git_slug": slug,
+                "label": f"{slug} (uploaded)",
+                "key": f"uploaded|{slug}",
+                "use_global": False,
+                "multi_repo": False,
+            }
+        )
+
     if multi_repo_indexed(indexes):
         options.append(
             {
@@ -266,6 +293,7 @@ def queryable_repos(
                 "label": "Combined multi-repo index",
                 "key": "__multi_repo__",
                 "use_global": True,
+                "multi_repo": True,
             }
         )
     return options

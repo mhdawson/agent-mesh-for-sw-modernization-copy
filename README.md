@@ -185,6 +185,16 @@ make deploy-console-app
 # https://code-understanding-console-<namespace>.apps.<cluster-domain>
 ```
 
+After the console is deployed, run its browser smoke test with:
+```
+KFP_NAMESPACE=my-data-science-project make test-ui
+```
+This checks the deployment and Route before opening the UI in Chromium. You can
+also export `KFP_NAMESPACE` before running `make test-ui`. To test through a
+port-forward instead, start `make port-forward-console-app` and run
+`make test-ui KFP_NAMESPACE=my-data-science-project UI_URL=http://localhost:8080`
+in another terminal.
+
 To run the app locally:
 ```
 make run-console-app

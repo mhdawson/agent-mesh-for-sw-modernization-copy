@@ -5,7 +5,6 @@
 .DEFAULT_GOAL := install
 
 ENV_FILE            	?= ./.env
-WORKBENCH_IMAGESTREAM_NAMESPACE ?= redhat-ods-applications
 GIT_REPO_URL        	:= $(shell git remote get-url origin 2>/dev/null | sed 's|^git@\([^:]*\):\(.*\)$$|https://\1/\2|')
 GIT_REPO_BRANCH     	:= $(shell git branch --show-current 2>/dev/null)
 CLUSTER_DOMAIN      	:= $(shell oc get ingress.config cluster -o jsonpath='{.spec.domain}' 2>/dev/null)
@@ -34,6 +33,14 @@ export KFP_DATA_GENERATION_BASE_IMAGE_NAME \
 	KFP_PIPELINE_TOOLS_IMAGE_NAME \
 	CONSOLE_APP_IMAGE_NAME \
 	CONSOLE_PLUGIN_IMAGE_NAME
+
+export UI_URL
+
+E2E_UI_PYTHON ?= 3.12
+E2E_UI_REQUIREMENTS ?= ui/tests/e2e_ui/requirements.txt
+
+E2E_UI_INSTALL_CMD := uv python install $(E2E_UI_PYTHON) && uv run --no-project --python $(E2E_UI_PYTHON) --with-requirements $(E2E_UI_REQUIREMENTS) -- playwright install chromium
+E2E_UI_TEST_CMD    := uv run --no-project --python $(E2E_UI_PYTHON) --with-requirements $(E2E_UI_REQUIREMENTS) -- python -m pytest ui/tests/e2e_ui/ -v --tb=short --browser chromium --output=ui/tests/e2e_ui/test-results --screenshot=on --tracing=retain-on-failure
 
 # ============================================================================
 # Container engine
@@ -68,6 +75,20 @@ endif
 	build-images \
 	build-all-images \
 	push-all-images \
+	build-data-generation-image \
+	push-data-generation-image \
+	build-data-indexing-image \
+	push-data-indexing-image \
+	build-data-analysis-image \
+	push-data-analysis-image \
+	build-pipeline-tools-image \
+	push-pipeline-tools-image \
+	build-console-app-image \
+	push-console-app-image \
+	build-console-plugin-image \
+	push-console-plugin-image \
+	_build-one-image \
+	_push-one-image \
 	upload-pipelines \
 	upload-mlflow-assets \
 	upload-prebuilt-index \
@@ -80,7 +101,9 @@ endif
 	port-forward-console-app \
 	apply-plugin-src \
 	deploy-console-plugin \
-	enable-console-plugin
+	enable-console-plugin \
+	test-ui-install \
+	test-ui
 
 help:
 	@echo "Agent Mesh for Software Modernization"
@@ -116,7 +139,7 @@ help-all:
 	@echo "  prepare-workbench-images    Register project workbench images with OpenShift AI"
 	@echo "  deploy-notebooks            Deploy the data generation and indexing notebooks"
 	@echo "  apply-secrets               Create or update application secrets"
-	@echo "  deploy-otel                 Deploy OpenTelemetry and Tempo resources when available"
+	@echo "  deploy-otel                 Deploy OpenTelemetry and Tempo resources when enabled"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test-all                    Run all test suites"
@@ -129,6 +152,18 @@ help-all:
 	@echo "  build-images                Build and push all application images"
 	@echo "  build-all-images            Build all application images"
 	@echo "  push-all-images             Push all application images"
+	@echo "  build-data-generation-image Build the data generation image"
+	@echo "  push-data-generation-image  Push the data generation image"
+	@echo "  build-data-indexing-image  Build the data indexing image"
+	@echo "  push-data-indexing-image   Push the data indexing image"
+	@echo "  build-data-analysis-image  Build the data analysis image"
+	@echo "  push-data-analysis-image   Push the data analysis image"
+	@echo "  build-pipeline-tools-image Build the pipeline tools image"
+	@echo "  push-pipeline-tools-image  Push the pipeline tools image"
+	@echo "  build-console-app-image    Build the console app image"
+	@echo "  push-console-app-image     Push the console app image"
+	@echo "  build-console-plugin-image Build the console plugin image"
+	@echo "  push-console-plugin-image  Push the console plugin image"
 	@echo ""
 	@echo "Pipelines and assets:"
 	@echo "  upload-pipelines            Upload the Kubeflow pipelines"
@@ -142,6 +177,8 @@ help-all:
 	@echo "  run-console-app             Run the console application locally"
 	@echo "  deploy-console-app          Deploy the console application"
 	@echo "  port-forward-console-app    Forward the deployed console to localhost:8080"
+	@echo "  test-ui-install             Install Playwright and Chromium for UI smoke tests"
+	@echo "  test-ui                     Check the deployed console UI with Playwright"
 	@echo ""
 	@echo "OpenShift console plugin:"
 	@echo "  apply-plugin-src            Publish console-plugin job scripts"
@@ -155,6 +192,9 @@ help-all:
 	@echo ""
 	@echo "Common runtime overrides (not exhaustive):"
 	@echo "  ENV_FILE                    Environment file to load (default: ./.env)"
+	@echo "  KFP_NAMESPACE               OpenShift namespace required by test-ui"
+	@echo "  UI_URL                      Override the console URL for test-ui (for example http://localhost:8080)"
+	@echo "  E2E_UI_PYTHON               Python version for Playwright tests (default: 3.12)"
 	@echo "  DEPLOY_EMBEDDING_MODEL      Deploy e5-mistral during install (default: false)"
 	@echo "  DEPLOY_OTEL                 Deploy OpenTelemetry and Tempo during install (default: false)"
 	@echo "  PIPELINE_GIT_REPO           Override the repository used by run-pipelines"
@@ -218,7 +258,6 @@ install:
 		--set "pipelineTools.image.tag=$$KFP_PIPELINE_TOOLS_IMAGE_TAG" \
 		--set "clusterDomain=$(CLUSTER_DOMAIN)" \
 		--set "mlflowGatewayHost=$(GATEWAY_HOST)" \
-		--set "imageStreams.namespace=$(WORKBENCH_IMAGESTREAM_NAMESPACE)" \
 		--set imageStreams.enabled=false \
 		--set deployNotebooks=true \
 		--set otel.enabled=false; \
@@ -303,7 +342,7 @@ uninstall:
 		configmap/code-understanding-console-plugin-config \
 		configmap/code-understanding-job-scripts \
 		-n "$$KFP_NAMESPACE" --ignore-not-found; \
-	oc delete imagestream -n "$(WORKBENCH_IMAGESTREAM_NAMESPACE)" \
+	oc delete imagestream -n "$$KFP_NAMESPACE" \
 		-l "app.kubernetes.io/part-of=agent-mesh-for-sw,agent-mesh.redhat.com/owner-namespace=$$KFP_NAMESPACE" \
 		--ignore-not-found; \
 	oc delete secret git-credentials code-understanding-env \
@@ -339,7 +378,6 @@ prepare-workbench-images:
 			--namespace "$$KFP_NAMESPACE" \
 			--set "namespace=$$KFP_NAMESPACE" \
 			--set imageStreams.enabled=true \
-			--set "imageStreams.namespace=$(WORKBENCH_IMAGESTREAM_NAMESPACE)" \
 			--set "dataGeneration.image.registry=$$KFP_IMAGE_REGISTRY" \
 			--set "dataGeneration.image.name=$$KFP_DATA_GENERATION_BASE_IMAGE_NAME" \
 			--set "dataGeneration.image.tag=$$KFP_DATA_GENERATION_BASE_IMAGE_TAG" \
@@ -352,7 +390,7 @@ prepare-workbench-images:
 			-s templates/workbench-imagestreams.yaml | \
 			oc apply -f - -o name)"; \
 		echo "==> Waiting for project workbench images to import..."; \
-		oc wait -n "$(WORKBENCH_IMAGESTREAM_NAMESPACE)" \
+		oc wait -n "$$KFP_NAMESPACE" \
 			--for=jsonpath='{.status.tags[0].items[0].image}' \
 			--timeout=300s $$IMAGESTREAMS
 
@@ -380,7 +418,6 @@ deploy-notebooks: prepare-workbench-images
 			--set analysis.image.registry="$$KFP_IMAGE_REGISTRY" \
 			--set analysis.image.name="$$KFP_ANALYSIS_BASE_IMAGE_NAME" \
 			--set analysis.image.tag="$$KFP_ANALYSIS_BASE_IMAGE_TAG" \
-			--set imageStreams.namespace="$(WORKBENCH_IMAGESTREAM_NAMESPACE)" \
 			--set deployNotebooks=true
 
 apply-secrets:
@@ -454,6 +491,125 @@ lint:
 # ============================================================================
 # Container images
 # ============================================================================
+
+# Build or push one image by selecting its variable names and build context.
+_build-one-image:
+	@if [ -f "$(ENV_FILE)" ]; then set -a && . "$(ENV_FILE)" && set +a; fi && \
+	REGISTRY="$(REGISTRY)" && \
+	VERSION="$(VERSION)" && \
+	: "$${REGISTRY:=$$KFP_IMAGE_REGISTRY}" && \
+	: "$${REGISTRY:?Set REGISTRY or KFP_IMAGE_REGISTRY}" && \
+	IMAGE_NAME="$$(printenv "$(IMAGE_NAME_VAR)")" && \
+	IMAGE_TAG="$${VERSION:-$$(printenv "$(IMAGE_TAG_VAR)")}" && \
+	: "$${IMAGE_NAME:?Set $(IMAGE_NAME_VAR) in $(ENV_FILE)}" && \
+	: "$${IMAGE_TAG:?Set VERSION or $(IMAGE_TAG_VAR) in $(ENV_FILE)}" && \
+	IMAGE="$$REGISTRY/$$IMAGE_NAME:$$IMAGE_TAG" && \
+	if [ -n "$(SKIP_IF_NAME_VAR)" ]; then \
+		OTHER_NAME="$$(printenv "$(SKIP_IF_NAME_VAR)")" && \
+		OTHER_TAG="$${VERSION:-$$(printenv "$(SKIP_IF_TAG_VAR)")}" && \
+		if [ "$$IMAGE" = "$$REGISTRY/$$OTHER_NAME:$$OTHER_TAG" ]; then \
+			echo "==> Skipping duplicate image build: $$IMAGE"; exit 0; \
+		fi; \
+	fi && \
+	echo "==> Building image: $$IMAGE" && \
+	$(IMAGE_BUILD) -t "$$IMAGE" -f "$(IMAGE_FILE)" "$(IMAGE_CONTEXT)"
+
+_push-one-image:
+	@if [ -f "$(ENV_FILE)" ]; then set -a && . "$(ENV_FILE)" && set +a; fi && \
+	REGISTRY="$(REGISTRY)" && \
+	VERSION="$(VERSION)" && \
+	: "$${REGISTRY:=$$KFP_IMAGE_REGISTRY}" && \
+	: "$${REGISTRY:?Set REGISTRY or KFP_IMAGE_REGISTRY}" && \
+	IMAGE_NAME="$$(printenv "$(IMAGE_NAME_VAR)")" && \
+	IMAGE_TAG="$${VERSION:-$$(printenv "$(IMAGE_TAG_VAR)")}" && \
+	: "$${IMAGE_NAME:?Set $(IMAGE_NAME_VAR) in $(ENV_FILE)}" && \
+	: "$${IMAGE_TAG:?Set VERSION or $(IMAGE_TAG_VAR) in $(ENV_FILE)}" && \
+	IMAGE="$$REGISTRY/$$IMAGE_NAME:$$IMAGE_TAG" && \
+	if [ -n "$(SKIP_IF_NAME_VAR)" ]; then \
+		OTHER_NAME="$$(printenv "$(SKIP_IF_NAME_VAR)")" && \
+		OTHER_TAG="$${VERSION:-$$(printenv "$(SKIP_IF_TAG_VAR)")}" && \
+		if [ "$$IMAGE" = "$$REGISTRY/$$OTHER_NAME:$$OTHER_TAG" ]; then \
+			echo "==> Skipping duplicate image push: $$IMAGE"; exit 0; \
+		fi; \
+	fi && \
+	echo "==> Pushing image: $$IMAGE" && \
+	$(IMAGE_PUSH) "$$IMAGE"
+
+build-data-generation-image:
+	@$(MAKE) --no-print-directory _build-one-image \
+		IMAGE_NAME_VAR=KFP_DATA_GENERATION_BASE_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_DATA_GENERATION_BASE_IMAGE_TAG \
+		IMAGE_FILE=resources/images/data-generation/Containerfile \
+		IMAGE_CONTEXT=resources/images/data-generation
+
+push-data-generation-image:
+	@$(MAKE) --no-print-directory _push-one-image \
+		IMAGE_NAME_VAR=KFP_DATA_GENERATION_BASE_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_DATA_GENERATION_BASE_IMAGE_TAG
+
+build-data-indexing-image:
+	@$(MAKE) --no-print-directory _build-one-image \
+		IMAGE_NAME_VAR=KFP_INDEXING_BASE_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_INDEXING_BASE_IMAGE_TAG \
+		IMAGE_FILE=resources/images/data-indexing/Containerfile \
+		IMAGE_CONTEXT=resources/images/data-indexing
+
+push-data-indexing-image:
+	@$(MAKE) --no-print-directory _push-one-image \
+		IMAGE_NAME_VAR=KFP_INDEXING_BASE_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_INDEXING_BASE_IMAGE_TAG
+
+build-data-analysis-image:
+	@$(MAKE) --no-print-directory _build-one-image \
+		IMAGE_NAME_VAR=KFP_ANALYSIS_BASE_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_ANALYSIS_BASE_IMAGE_TAG \
+		SKIP_IF_NAME_VAR=KFP_INDEXING_BASE_IMAGE_NAME \
+		SKIP_IF_TAG_VAR=KFP_INDEXING_BASE_IMAGE_TAG \
+		IMAGE_FILE=resources/images/data-indexing/Containerfile \
+		IMAGE_CONTEXT=resources/images/data-indexing
+
+push-data-analysis-image:
+	@$(MAKE) --no-print-directory _push-one-image \
+		IMAGE_NAME_VAR=KFP_ANALYSIS_BASE_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_ANALYSIS_BASE_IMAGE_TAG \
+		SKIP_IF_NAME_VAR=KFP_INDEXING_BASE_IMAGE_NAME \
+		SKIP_IF_TAG_VAR=KFP_INDEXING_BASE_IMAGE_TAG
+
+build-pipeline-tools-image:
+	@$(MAKE) --no-print-directory _build-one-image \
+		IMAGE_NAME_VAR=KFP_PIPELINE_TOOLS_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_PIPELINE_TOOLS_IMAGE_TAG \
+		IMAGE_FILE=resources/images/pipeline-tools/Containerfile \
+		IMAGE_CONTEXT=resources/images/pipeline-tools
+
+push-pipeline-tools-image:
+	@$(MAKE) --no-print-directory _push-one-image \
+		IMAGE_NAME_VAR=KFP_PIPELINE_TOOLS_IMAGE_NAME \
+		IMAGE_TAG_VAR=KFP_PIPELINE_TOOLS_IMAGE_TAG
+
+build-console-app-image:
+	@$(MAKE) --no-print-directory _build-one-image \
+		IMAGE_NAME_VAR=CONSOLE_APP_IMAGE_NAME \
+		IMAGE_TAG_VAR=CONSOLE_IMAGE_TAG \
+		IMAGE_FILE=ui/Dockerfile \
+		IMAGE_CONTEXT=ui
+
+push-console-app-image:
+	@$(MAKE) --no-print-directory _push-one-image \
+		IMAGE_NAME_VAR=CONSOLE_APP_IMAGE_NAME \
+		IMAGE_TAG_VAR=CONSOLE_IMAGE_TAG
+
+build-console-plugin-image:
+	@$(MAKE) --no-print-directory _build-one-image \
+		IMAGE_NAME_VAR=CONSOLE_PLUGIN_IMAGE_NAME \
+		IMAGE_TAG_VAR=CONSOLE_IMAGE_TAG \
+		IMAGE_FILE=console-plugin/Dockerfile \
+		IMAGE_CONTEXT=console-plugin
+
+push-console-plugin-image:
+	@$(MAKE) --no-print-directory _push-one-image \
+		IMAGE_NAME_VAR=CONSOLE_PLUGIN_IMAGE_NAME \
+		IMAGE_TAG_VAR=CONSOLE_IMAGE_TAG
 
 build-images: build-all-images push-all-images
 
@@ -653,8 +809,10 @@ run-pipelines:
 deploy-otel:
 	@set -a && . $(ENV_FILE) && set +a && \
 	\
-	[ -n "$$OTEL_SERVICE_NAME" ] || { echo "Error: OTEL_SERVICE_NAME is not set in $(ENV_FILE)."; exit 1; } && \
-	[ -n "$$OTEL_NAMESPACE" ] || { echo "Error: OTEL_NAMESPACE is not set in $(ENV_FILE)."; exit 1; } && \
+	if [ "$(DEPLOY_OTEL)" != "true" ]; then \
+		echo "Skipping deploy-otel: set DEPLOY_OTEL=true to enable it."; \
+		exit 0; \
+	fi && \
 	\
 	echo "==> Checking for OpenTelemetry and Tempo CRDs..." && \
 	if ! oc get crd opentelemetrycollectors.opentelemetry.io >/dev/null 2>&1 || \
@@ -662,6 +820,9 @@ deploy-otel:
 		echo "Skipping deploy-otel: OpenTelemetry and/or Tempo operators are not installed."; \
 		exit 0; \
 	fi && \
+	\
+	[ -n "$$OTEL_SERVICE_NAME" ] || { echo "Error: OTEL_SERVICE_NAME is not set in $(ENV_FILE)."; exit 1; } && \
+	[ -n "$$OTEL_NAMESPACE" ] || { echo "Error: OTEL_NAMESPACE is not set in $(ENV_FILE)."; exit 1; } && \
 	\
 	if oc get tempostack $$OTEL_SERVICE_NAME -n $$OTEL_NAMESPACE >/dev/null 2>&1; then \
 		echo "==> OTel infrastructure already deployed, skipping."; \
@@ -757,6 +918,25 @@ port-forward-console-app:
 	@set -a && . $(ENV_FILE) && set +a && \
 	echo "==> Forwarding http://localhost:8080 -> code-understanding-console:8080" && \
 	oc port-forward svc/code-understanding-console 8080:8080 -n $$KFP_NAMESPACE
+
+test-ui-install:
+	@echo "==> Installing Playwright and Chromium for UI smoke tests..."
+	$(E2E_UI_INSTALL_CMD)
+
+test-ui:
+	@set -eu; \
+	KFP_NAMESPACE="$(KFP_NAMESPACE)"; export KFP_NAMESPACE; \
+	: "$${KFP_NAMESPACE:?ERROR: set KFP_NAMESPACE in the environment or pass KFP_NAMESPACE=<namespace> to make}"; \
+	echo "==> Checking deployed Code Understanding console in namespace $$KFP_NAMESPACE..."; \
+	oc get deployment code-understanding-console -n "$$KFP_NAMESPACE" >/dev/null; \
+	oc rollout status deployment/code-understanding-console -n "$$KFP_NAMESPACE" --timeout=300s; \
+	ROUTE_HOST="$$(oc get route code-understanding-console -n "$$KFP_NAMESPACE" -o jsonpath='{.spec.host}')"; \
+	if [ -z "$$ROUTE_HOST" ]; then echo "ERROR: Route code-understanding-console has no host in namespace $$KFP_NAMESPACE." >&2; exit 1; fi; \
+	if [ -z "$$UI_URL" ]; then export UI_URL="https://$$ROUTE_HOST"; fi; \
+	export KFP_NAMESPACE; \
+	echo "==> Testing console UI at $$UI_URL"; \
+	$(MAKE) test-ui-install; \
+	$(E2E_UI_TEST_CMD)
 
 # ============================================================================
 # OpenShift console plugin

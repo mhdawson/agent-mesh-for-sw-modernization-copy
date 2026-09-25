@@ -8,5 +8,5 @@
 {{- end -}}
 
 {{- define "agent-mesh.imageStreamRef" -}}
-{{- printf "%s/%s/%s:%s" .root.Values.imageStreams.registry .root.Values.imageStreams.namespace (include "agent-mesh.imageStreamName" (dict "root" .root "base" .base)) .tag -}}
+{{- printf "%s/%s/%s:%s" .root.Values.imageStreams.registry .root.Values.namespace (include "agent-mesh.imageStreamName" (dict "root" .root "base" .base)) .tag -}}
 {{- end -}}

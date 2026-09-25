@@ -287,6 +287,8 @@ def submit_adhoc_query(
     *,
     git_repo: str = "",
     git_branch: str = "main",
+    git_slug: str = "",
+    multi_repo: bool = False,
     use_global: bool | None = None,
     retry_count: int = 3,
 ) -> dict[str, str]:
@@ -302,7 +304,7 @@ def submit_adhoc_query(
         raise RuntimeError("AGENTMESH_REPO_URL is not set (needed to clone this workflow into the job).")
 
     if use_global is None:
-        use_global = not bool(git_repo)
+        use_global = not bool(git_repo or git_slug)
 
     cm_name = f"adhoc-query-{job_id}"
     core.create_namespaced_config_map(
@@ -324,6 +326,8 @@ def submit_adhoc_query(
         client.V1EnvVar(name="RETRY_COUNT", value=str(retry_count)),
         client.V1EnvVar(name="GIT_REPO", value=git_repo),
         client.V1EnvVar(name="GIT_BRANCH", value=git_branch or "main"),
+        client.V1EnvVar(name="GIT_SLUG", value=git_slug),
+        client.V1EnvVar(name="MULTI_REPO", value="true" if multi_repo else "false"),
         client.V1EnvVar(name="GRAPHRAG_LOCAL_QUERY_SKIP_TLS_VERIFY", value="true"),
     ]
 
@@ -361,7 +365,7 @@ workflows/examples/code_understanding/scripts/run_adhoc_query.sh
     return {
         "job_name": job_name,
         "namespace": ns,
-        "scope": "global" if use_global else f"{git_repo}@{git_branch}",
+        "scope": "global" if use_global else (git_slug or f"{git_repo}@{git_branch}"),
     }
 
 

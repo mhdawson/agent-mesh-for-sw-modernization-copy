@@ -30,4 +30,5 @@ dist/
 console-plugin/package-lock.json
 *.pyc
 .pytest_cache/
+ui/tests/e2e_ui/test-results/
 .idea

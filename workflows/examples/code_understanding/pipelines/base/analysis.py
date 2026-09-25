@@ -82,6 +82,7 @@ class AnalysisPipeline:
         use_global: bool = True,
         git_repo: str = "",
         git_branch: str = "main",
+        git_slug: str = "",
         multi_repo: bool = False,
     ):
         """Queries the GraphRAG index with an LLM and returns the result."""
@@ -94,9 +95,9 @@ class AnalysisPipeline:
 
         logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
-        use_multi_repo = multi_repo or not git_repo
+        use_multi_repo = multi_repo or (not git_repo and not git_slug)
 
-        git_slug = generate_git_slug(git_repo, git_branch) if git_repo else ""
+        git_slug = git_slug or (generate_git_slug(git_repo, git_branch) if git_repo else "")
 
         graphrag_source_path = "graph_rag_app/source"
 

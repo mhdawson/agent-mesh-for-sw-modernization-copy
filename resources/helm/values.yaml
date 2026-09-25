@@ -7,7 +7,6 @@ deployNotebooks: false
 
 imageStreams:
   enabled: false
-  namespace: redhat-ods-applications
   registry: image-registry.openshift-image-registry.svc:5000
   names:
     dataGeneration: custom-data-generation
@@ -98,7 +97,7 @@ console:
   enabled: false
   replicas: 1
   image: ""
-  imagePullPolicy: IfNotPresent
+  imagePullPolicy: Always
   jobScripts:
     enabled: false
     runPipelines: ""

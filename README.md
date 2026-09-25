@@ -10,6 +10,7 @@ Contents
   - [Preparing the Environment](#preparing-the-environment)
   - [(Optional) Building the Container Images](#optional-building-the-container-images)
   - [Installing via Makefile](#installing-via-makefile)
+  - [Uninstalling](#uninstalling)
 - [Running the Code Understanding Workflow](#running-the-code-understanding-workflow)
 - [Running Adhoc Queries](#running-adhoc-queries)
 - [Integrating with other tools](#integrating-with-other-tools)
@@ -76,6 +77,29 @@ Ensure that you have access to OpenAI-compatible endpoints for the following mod
 1. Run the Makefile: `make install`
 (**NOTE**: To deploy the local `e5-mistral` embedding model as part of installation, run:
    `make install DEPLOY_EMBEDDING_MODEL=true`)
+
+OpenTelemetry and Tempo are optional and disabled by default. To deploy them as
+part of installation, run `make install DEPLOY_OTEL=true`.
+
+### Uninstalling
+
+Run:
+
+```sh
+make uninstall
+```
+
+Uninstall stops project upload/run/query Jobs, removes Kubeflow pipeline
+Workflows and their task pods, removes the optional `e5-mistral` release,
+uninstalls `agent-mesh-for-sw`, removes the project workbench ImageStreams,
+manually created secrets, and operator-generated storage, and deletes the
+application's PVC-backed data. The application and OpenTelemetry namespaces are
+preserved. OpenTelemetry variables are not required when telemetry was not
+deployed.
+
+The uninstall target supports deployments created with the current Helm
+ownership model. It does not remove externally stored MLflow data, externally
+pushed container images, or the optional cluster-wide OpenShift console plugin.
 
 ## Running the Code Understanding Workflow
 1. To run the **Code Understanding** pipeline for a single repository, run:

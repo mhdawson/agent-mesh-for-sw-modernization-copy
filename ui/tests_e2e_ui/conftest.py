@@ -44,10 +44,8 @@ def open_console(page: Page):
 
     response = page.goto(UI_URL, wait_until="domcontentloaded")
     assert response is not None and response.status == 200, "Console page did not return HTTP 200"
-    expect(page.get_by_role("heading", name="Code Understanding")).to_be_visible()
+    expect(page.locator(".cu-brand-title")).to_have_text("Code Understanding")
     expect(page.locator("#status")).to_contain_text("Connected")
-    if KFP_NAMESPACE:
-        expect(page.locator("#status")).to_contain_text(f"Namespace: {KFP_NAMESPACE}")
 
     yield
 

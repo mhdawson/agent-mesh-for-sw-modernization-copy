@@ -24,8 +24,11 @@ GIT_LOCAL_BRANCH    	?= $(shell git branch --show-current 2>/dev/null)
 GIT_REPO_REMOTE     	?= $(or $(shell git config --get "branch.$(GIT_LOCAL_BRANCH).remote" 2>/dev/null),origin)
 GIT_REPO_URL        	?= $(shell git remote get-url "$(GIT_REPO_REMOTE)" 2>/dev/null | sed 's|^git@\([^:]*\):\(.*\)$$|https://\1/\2|')
 GIT_REPO_BRANCH     	?= $(or $(shell git config --get "branch.$(GIT_LOCAL_BRANCH).merge" 2>/dev/null | sed 's|^refs/heads/||'),$(GIT_LOCAL_BRANCH))
-CLUSTER_DOMAIN      	?= $(shell oc get ingress.config cluster -o jsonpath='{.spec.domain}' 2>/dev/null)
-GATEWAY_HOST        	?= $(shell oc get gateway data-science-gateway -n openshift-ingress -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)
+CLUSTER_DOMAIN      	?= $(shell oc get ingress.config cluster --request-timeout=10s -o jsonpath='{.spec.domain}' 2>/dev/null)
+GATEWAY_HOST        	?= $(shell oc get gateway data-science-gateway -n openshift-ingress --request-timeout=10s -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)
+# Keep these lazy cluster lookups out of every recipe's exported environment,
+# so install can run its preflight before the lookups are expanded.
+unexport CLUSTER_DOMAIN GATEWAY_HOST
 PIPELINE_GIT_REPO   	?=
 PIPELINE_GIT_BRANCH 	?=
 PIPELINE_GIT_REPO_LIST	?=
@@ -170,6 +173,7 @@ HELM_UPGRADE_ARGS = agent-mesh-for-sw resources/helm \
 	format \
 	lint \
 	install \
+	_install-preflight \
 	uninstall \
 	deploy-embedding-model \
 	prepare-workbench-images \
@@ -319,11 +323,23 @@ help-all:
 # Installation and deployment
 # ============================================================================
 
-install: helm-dependencies
+_install-preflight:
 	@set -e; \
 	[ -n "$(AWS_ACCESS_KEY_ID)" ] || { echo "AWS_ACCESS_KEY_ID must be set" >&2; exit 1; }; \
 	[ -n "$(AWS_SECRET_ACCESS_KEY)" ] || { echo "AWS_SECRET_ACCESS_KEY must be set" >&2; exit 1; }; \
 	[ -n "$(AWS_S3_BUCKET)" ] || { echo "AWS_S3_BUCKET must be set" >&2; exit 1; }; \
+	echo "==> Checking OpenShift login (10-second limit)..."; \
+	if ! oc whoami --request-timeout=10s >/dev/null 2>&1; then \
+		echo "Error: Could not verify OpenShift login. Run 'oc login' and check cluster connectivity, then retry." >&2; \
+		exit 1; \
+	fi
+	@echo "==> OpenShift login verified."
+
+# Make expands recipe variables after prerequisites finish. This keeps the
+# cluster lookups in CLUSTER_DOMAIN and GATEWAY_HOST behind the login check.
+install: _install-preflight
+	$(MAKE) helm-dependencies
+	@set -e; \
 	\
 	echo "==> Creating namespaces..." && \
 	set -- agent-mesh-for-sw resources/helm \
@@ -732,7 +748,7 @@ build-console-app-image:
 		IMAGE_NAME_VAR=CONSOLE_APP_IMAGE_NAME \
 		IMAGE_TAG_VAR=CONSOLE_IMAGE_TAG \
 		IMAGE_FILE=ui/Dockerfile \
-		IMAGE_CONTEXT=ui
+		IMAGE_CONTEXT=.
 
 push-console-app-image:
 	@$(MAKE) --no-print-directory _push-one-image \

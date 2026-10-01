@@ -4,13 +4,19 @@ import io
 import json
 from pathlib import Path
 import tarfile
+import time
+from uuid import uuid4
+
+import pytest
 
 from playwright.sync_api import Page, expect
 
 QUERY_TIMEOUT_MS = 30 * 60 * 1000
+PIPELINE_TIMEOUT_MS = 60 * 60 * 1000
 INDEX_TRANSFER_TIMEOUT_MS = 10 * 60 * 1000
 SOURCE_INDEX_NAME = "tic-tac-toe-sample"
-UPLOADED_INDEX_NAME = "copy-of-tic-tac-toe-sample"
+ANALYSIS_REPO_NAME = "yappb"
+ANALYSIS_REPO_BRANCH = "master"
 
 
 def copy_bundle_with_new_slug(source: Path, destination: Path, new_slug: str) -> None:
@@ -31,20 +37,23 @@ def copy_bundle_with_new_slug(source: Path, destination: Path, new_slug: str) ->
                     copied.addfile(member, io.BytesIO(manifest_bytes))
                 elif member.isfile():
                     member_file = original.extractfile(member)
-                    assert member_file is not None, f"Downloaded index member is unreadable: {member.name}"
+                    assert member_file is not None, (
+                        f"Downloaded index member is unreadable: {member.name}"
+                    )
                     with member_file:
                         copied.addfile(member, member_file)
                 else:
                     copied.addfile(member)
 
 
-def test_console_loads_repositories_and_live_panels(page: Page) -> None:
+def test_console_loads_repositories_and_recent_runs(page: Page) -> None:
     checkboxes = page.locator("#repo-list input[type=checkbox]")
     expect(checkboxes.first).to_be_visible()
 
-    # These panels should render either their data or the normal empty state.
-    expect(page.locator("#indexes")).not_to_be_empty()
-    expect(page.locator("#jobs")).not_to_be_empty()
+    # Recent Runs renders either run cards or its normal empty state.
+    runs = page.locator("#runs")
+    expect(runs).to_be_visible()
+    expect(runs).not_to_be_empty()
 
 
 def test_tabs_and_repository_selection_work(page: Page) -> None:
@@ -55,7 +64,7 @@ def test_tabs_and_repository_selection_work(page: Page) -> None:
     expect(page.locator("#tab-repos")).to_be_visible()
     analysis_tab.click()
     expect(page.locator("#tab-pipelines")).to_be_visible()
-    expect(page.get_by_role("button", name="Run Code Understanding")).to_be_visible()
+    expect(page.get_by_role("button", name="Run Analysis")).to_be_visible()
 
     chat_tab.click()
     expect(page.locator("#tab-chat")).to_be_visible()
@@ -111,53 +120,146 @@ def test_analysis_selection_summary_tracks_repository_changes(page: Page) -> Non
     expect(summary).to_contain_text("None selected")
 
 
-def test_tic_tac_toe_index_can_be_copied_and_uploaded_with_new_name(
+def test_analysis_of_yappb_returns_report(page: Page) -> None:
+    repo_cards = page.locator("#repo-list .cu-repo")
+    preloaded_repo = None
+    for index in range(repo_cards.count()):
+        candidate = repo_cards.nth(index)
+        name = candidate.locator(".cu-repo-title").inner_text().strip()
+        branch = candidate.locator(".cu-chips .cu-chip").first.inner_text().strip()
+        if name == ANALYSIS_REPO_NAME and branch == ANALYSIS_REPO_BRANCH:
+            preloaded_repo = candidate
+            break
+    assert preloaded_repo is not None, (
+        f"Repository {ANALYSIS_REPO_NAME} @ {ANALYSIS_REPO_BRANCH} is missing from the catalog"
+    )
+
+    page.get_by_role("button", name="Clear").click()
+    preloaded_repo.locator("input").check()
+    page.locator('.cu-tabs button[data-tab="pipelines"]').click()
+    expect(page.locator("#pipeline-selection")).to_contain_text(
+        f"{ANALYSIS_REPO_NAME} @ {ANALYSIS_REPO_BRANCH}"
+    )
+
+    with page.expect_response(
+        lambda response: response.url.endswith("/api/v2/pipelines")
+        and response.request.method == "POST",
+        timeout=30_000,
+    ) as submit_info:
+        page.get_by_role("button", name="Run Analysis").click()
+
+    submit_response = submit_info.value
+    submit_text = submit_response.text()
+    assert submit_response.ok, (
+        f"Analysis submission failed: {submit_response.status} {submit_text}"
+    )
+    run_id = submit_response.json().get("job_id")
+    assert run_id, f"Analysis submission returned no run ID: {submit_text}"
+
+    run_url = f"{page.url.rstrip('/')}/api/v2/pipelines/runs/{run_id}"
+    deadline = time.monotonic() + PIPELINE_TIMEOUT_MS / 1000
+    snapshot = {}
+    while time.monotonic() < deadline:
+        run_response = page.request.get(run_url, timeout=30_000)
+        run_text = run_response.text()
+        assert run_response.ok, f"Could not read analysis run: {run_response.status} {run_text}"
+        snapshot = run_response.json()
+        status = str(snapshot.get("status", "")).lower()
+        if status in {"failed", "cancelled", "error"}:
+            pytest.fail(f"Analysis run {run_id} ended with status {status}: {snapshot}")
+        report = snapshot.get("analysis_report")
+        if status == "succeeded" and isinstance(report, str) and report.strip():
+            break
+        time.sleep(15)
+
+    assert snapshot.get("status") == "succeeded", (
+        f"Analysis run {run_id} did not succeed within {PIPELINE_TIMEOUT_MS // 60_000} minutes: "
+        f"{snapshot}"
+    )
+    analysis_report = snapshot.get("analysis_report")
+    assert (
+        isinstance(analysis_report, str) and analysis_report.strip()
+    ), f"Analysis run {run_id} succeeded but returned no analysis report"
+
+    page.reload(wait_until="domcontentloaded")
+    created_run = page.locator(
+        f'#runs .cu-run-expand[data-run-id="{run_id}"]'
+    )
+    expect(created_run).to_be_visible(timeout=30_000)
+
+
+def test_recent_run_can_open_its_analysis_report(page: Page) -> None:
+    expand_buttons = page.locator("#runs .cu-run-expand")
+    if expand_buttons.count() == 0:
+        pytest.skip("No successful pipeline runs are available to open.")
+
+    page.locator('.cu-tabs button[data-tab="pipelines"]').click()
+    expand_buttons.first.click()
+
+    report_viewer = page.locator("#report-viewer")
+    expect(report_viewer).to_be_visible(timeout=30_000)
+    expect(page.locator("#report-viewer-title")).not_to_be_empty()
+
+
+def test_index_bundle_can_be_downloaded_and_uploaded_for_chat(
     page: Page,
     tmp_path: Path,
 ) -> None:
-    source_title = page.locator("#indexes").get_by_text(SOURCE_INDEX_NAME, exact=True)
-    expect(source_title).to_be_visible(timeout=30_000)
-    source_card = source_title.locator("xpath=../..")
-
-    with page.expect_download(timeout=INDEX_TRANSFER_TIMEOUT_MS) as download_info:
-        source_card.get_by_role("button", name="Download index").click()
-
-    download = download_info.value
-    original_filename = download.suggested_filename
-    assert SOURCE_INDEX_NAME in original_filename, (
-        f"Expected a {SOURCE_INDEX_NAME} bundle, got {original_filename!r}"
+    """Exercise the index API and verify uploads appear in the current Chat UI."""
+    console_url = page.url.rstrip("/")
+    indexes_response = page.request.get(
+        f"{console_url}/api/indexes", timeout=30_000
     )
-    assert original_filename.lower().endswith(".tar.gz"), (
-        f"Expected a .tar.gz index download, got {original_filename!r}"
+    assert indexes_response.ok, f"Could not list indexes: {indexes_response.status}"
+    indexes = indexes_response.json().get("indexes", [])
+    source_index = next(
+        (
+            index
+            for index in indexes
+            if SOURCE_INDEX_NAME in str(index.get("git_slug", ""))
+            and index.get("run_id")
+        ),
+        None,
     )
-    downloaded_archive = tmp_path / original_filename
-    download.save_as(downloaded_archive)
-    uploaded_archive = tmp_path / f"{UPLOADED_INDEX_NAME}.tar.gz"
-    copy_bundle_with_new_slug(downloaded_archive, uploaded_archive, UPLOADED_INDEX_NAME)
+    assert source_index is not None, f"No indexed {SOURCE_INDEX_NAME} repository was found"
 
-    page.locator("#index-upload-file").set_input_files(uploaded_archive)
-    expect(page.locator("#banner")).to_contain_text(
-        "Index uploaded successfully.", timeout=INDEX_TRANSFER_TIMEOUT_MS
+    download_response = page.request.get(
+        f"{console_url}/api/indexes/{source_index['run_id']}/download",
+        timeout=INDEX_TRANSFER_TIMEOUT_MS,
     )
+    assert download_response.ok, f"Index download failed: {download_response.status}"
+    filename = download_response.headers.get("content-disposition", "")
+    assert ".tar.gz" in filename.lower(), f"Unexpected download headers: {filename!r}"
 
-    uploaded_title = page.locator("#indexes").get_by_text(
-        UPLOADED_INDEX_NAME, exact=True
-    )
-    expect(uploaded_title).to_be_visible(timeout=INDEX_TRANSFER_TIMEOUT_MS)
-    uploaded_card = uploaded_title.locator("xpath=../..")
-    expect(uploaded_card.locator(".cu-chip.uploaded")).to_be_visible(
-        timeout=INDEX_TRANSFER_TIMEOUT_MS
-    )
+    downloaded_archive = tmp_path / "source-index.tar.gz"
+    downloaded_archive.write_bytes(download_response.body())
+    uploaded_slug = f"e2e-copy-{uuid4().hex[:10]}"
+    uploaded_archive = tmp_path / f"{uploaded_slug}.tar.gz"
+    copy_bundle_with_new_slug(downloaded_archive, uploaded_archive, uploaded_slug)
 
+    upload_response = page.request.post(
+        f"{console_url}/api/indexes/upload",
+        multipart={
+            "file": {
+                "name": uploaded_archive.name,
+                "mimeType": "application/gzip",
+                "buffer": uploaded_archive.read_bytes(),
+            }
+        },
+        timeout=INDEX_TRANSFER_TIMEOUT_MS,
+    )
+    response_text = upload_response.text()
+    assert upload_response.ok, f"Index upload failed: {upload_response.status} {response_text}"
+    assert upload_response.json().get("git_slug") == uploaded_slug
+
+    page.reload(wait_until="domcontentloaded")
     page.locator('.cu-tabs button[data-tab="chat"]').click()
     repository = page.locator("#chat-repo")
-    uploaded_option_label = f"{UPLOADED_INDEX_NAME} (uploaded)"
-    uploaded_option = repository.get_by_role(
-        "option", name=uploaded_option_label, exact=True
-    )
-    expect(uploaded_option).to_have_count(1, timeout=30_000)
-    repository.select_option(label=uploaded_option_label)
-    expect(repository).to_have_value(f"uploaded|{UPLOADED_INDEX_NAME}")
+    uploaded_label = f"{uploaded_slug} (uploaded)"
+    option = repository.get_by_role("option", name=uploaded_label, exact=True)
+    expect(option).to_have_count(1, timeout=30_000)
+    repository.select_option(label=uploaded_label)
+    expect(repository).to_have_value(f"uploaded|{uploaded_slug}")
 
 
 def test_chat_query_returns_answer_and_succeeds(page: Page) -> None:
@@ -171,7 +273,7 @@ def test_chat_query_returns_answer_and_succeeds(page: Page) -> None:
     question = "How does the game determine when a player wins?"
     page.get_by_placeholder("Ask about the selected code…").fill(question)
     with page.expect_response(
-        lambda response: response.url.endswith("/api/query")
+        lambda response: response.url.endswith("/api/v2/queries")
         and response.request.method == "POST",
         timeout=30_000,
     ) as query_response_info:
@@ -180,11 +282,12 @@ def test_chat_query_returns_answer_and_succeeds(page: Page) -> None:
     query_response = query_response_info.value
     response_text = query_response.text()
     assert query_response.ok, f"Query submission failed: {query_response.status} {response_text}"
-    job_name = query_response.json().get("job_name")
-    assert job_name, f"Query submission did not return a job name: {response_text}"
+    query_id = query_response.json().get("query_id")
+    assert query_id, f"Query submission did not return a query ID: {response_text}"
 
     answer = page.locator("#chat-log .cu-bubble.assistant:not(.thinking-msg)").last
     expect(answer).to_be_visible(timeout=QUERY_TIMEOUT_MS)
+    expect(answer).not_to_be_empty(timeout=QUERY_TIMEOUT_MS)
     answer_text = answer.inner_text().strip()
     assert answer_text, "The query response box is empty"
     for error_text in (
@@ -193,7 +296,3 @@ def test_chat_query_returns_answer_and_succeeds(page: Page) -> None:
         "The query job finished but no answer was found",
     ):
         assert error_text not in answer_text, f"Query returned an error: {answer_text}"
-
-    job_card = page.locator("#jobs .cu-job-card").filter(has_text=job_name)
-    expect(job_card).to_contain_text("Query", timeout=QUERY_TIMEOUT_MS)
-    expect(job_card.locator(".cu-chip")).to_have_text("Succeeded", timeout=QUERY_TIMEOUT_MS)

@@ -1,46 +1,14 @@
 """Browser smoke checks for the deployed Code Understanding console."""
 
-import io
-import json
-import tarfile
 import time
-from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from playwright.sync_api import Page, expect
 
 QUERY_TIMEOUT_MS = 30 * 60 * 1000
 PIPELINE_TIMEOUT_MS = 60 * 60 * 1000
-INDEX_TRANSFER_TIMEOUT_MS = 10 * 60 * 1000
-SOURCE_INDEX_NAME = "tic-tac-toe-sample"
-ANALYSIS_REPO_NAME = "yappb"
-ANALYSIS_REPO_BRANCH = "master"
-
-
-def copy_bundle_with_new_slug(source: Path, destination: Path, new_slug: str) -> None:
-    """Copy an index archive, changing only the bundle's display slug."""
-    with tarfile.open(source, mode="r:gz") as original:
-        with tarfile.open(destination, mode="w:gz") as copied:
-            for member in original.getmembers():
-                if member.name == "manifest.json":
-                    manifest_file = original.extractfile(member)
-                    assert manifest_file is not None, "Downloaded index has no readable manifest"
-                    with manifest_file:
-                        manifest = json.load(manifest_file)
-                    manifest["git_slug"] = new_slug
-                    manifest_bytes = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
-                    member.size = len(manifest_bytes)
-                    copied.addfile(member, io.BytesIO(manifest_bytes))
-                elif member.isfile():
-                    member_file = original.extractfile(member)
-                    assert (
-                        member_file is not None
-                    ), f"Downloaded index member is unreadable: {member.name}"
-                    with member_file:
-                        copied.addfile(member, member_file)
-                else:
-                    copied.addfile(member)
+ANALYSIS_REPO_NAME = "tic-tac-toe-sample"
+ANALYSIS_REPO_BRANCH = "main"
 
 
 def test_console_loads_repositories_and_recent_runs(page: Page) -> None:
@@ -114,8 +82,8 @@ def test_analysis_selection_summary_tracks_repository_changes(page: Page) -> Non
     expect(summary).to_contain_text("None selected")
 
 
-@pytest.mark.skip(reason="Indexing yappb is too large and slow for the UI E2E suite")
-def test_analysis_of_yappb_returns_report(page: Page) -> None:
+@pytest.mark.skip(reason="Indexing is too slow for the UI E2E suite")
+def test_analysis_of_tic_tac_toe_returns_report(page: Page) -> None:
     repo_cards = page.locator("#repo-list .cu-repo")
     preloaded_repo = None
     for index in range(repo_cards.count()):
@@ -192,64 +160,6 @@ def test_recent_run_can_open_its_analysis_report(page: Page) -> None:
     report_viewer = page.locator("#report-viewer")
     expect(report_viewer).to_be_visible(timeout=30_000)
     expect(page.locator("#report-viewer-title")).not_to_be_empty()
-
-
-def test_index_bundle_can_be_downloaded_and_uploaded_for_chat(
-    page: Page,
-    tmp_path: Path,
-) -> None:
-    """Exercise the index API and verify uploads appear in the current Chat UI."""
-    console_url = page.url.rstrip("/")
-    indexes_response = page.request.get(f"{console_url}/api/indexes", timeout=30_000)
-    assert indexes_response.ok, f"Could not list indexes: {indexes_response.status}"
-    indexes = indexes_response.json().get("indexes", [])
-    source_index = next(
-        (
-            index
-            for index in indexes
-            if SOURCE_INDEX_NAME in str(index.get("git_slug", "")) and index.get("run_id")
-        ),
-        None,
-    )
-    assert source_index is not None, f"No indexed {SOURCE_INDEX_NAME} repository was found"
-
-    download_response = page.request.get(
-        f"{console_url}/api/indexes/{source_index['run_id']}/download",
-        timeout=INDEX_TRANSFER_TIMEOUT_MS,
-    )
-    assert download_response.ok, f"Index download failed: {download_response.status}"
-    filename = download_response.headers.get("content-disposition", "")
-    assert ".tar.gz" in filename.lower(), f"Unexpected download headers: {filename!r}"
-
-    downloaded_archive = tmp_path / "source-index.tar.gz"
-    downloaded_archive.write_bytes(download_response.body())
-    uploaded_slug = f"e2e-copy-{uuid4().hex[:10]}"
-    uploaded_archive = tmp_path / f"{uploaded_slug}.tar.gz"
-    copy_bundle_with_new_slug(downloaded_archive, uploaded_archive, uploaded_slug)
-
-    upload_response = page.request.post(
-        f"{console_url}/api/indexes/upload",
-        multipart={
-            "file": {
-                "name": uploaded_archive.name,
-                "mimeType": "application/gzip",
-                "buffer": uploaded_archive.read_bytes(),
-            }
-        },
-        timeout=INDEX_TRANSFER_TIMEOUT_MS,
-    )
-    response_text = upload_response.text()
-    assert upload_response.ok, f"Index upload failed: {upload_response.status} {response_text}"
-    assert upload_response.json().get("git_slug") == uploaded_slug
-
-    page.reload(wait_until="domcontentloaded")
-    page.locator('.cu-tabs button[data-tab="chat"]').click()
-    repository = page.locator("#chat-repo")
-    uploaded_label = f"{uploaded_slug} (uploaded)"
-    option = repository.get_by_role("option", name=uploaded_label, exact=True)
-    expect(option).to_have_count(1, timeout=30_000)
-    repository.select_option(label=uploaded_label)
-    expect(repository).to_have_value(f"uploaded|{uploaded_slug}")
 
 
 def test_chat_query_returns_answer_and_succeeds(page: Page) -> None:

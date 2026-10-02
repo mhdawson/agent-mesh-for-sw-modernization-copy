@@ -20,10 +20,9 @@ USE_GLOBAL="${USE_GLOBAL:-1}"
 RETRY_COUNT="${RETRY_COUNT:-3}"
 GIT_REPO="${GIT_REPO:-}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
-GIT_SLUG="${GIT_SLUG:-}"
 MULTI_REPO="${MULTI_REPO:-false}"
 
-RESULT=$(QUESTION="$QUESTION" USE_GLOBAL="$USE_GLOBAL" RETRY_COUNT="$RETRY_COUNT" GIT_REPO="$GIT_REPO" GIT_BRANCH="$GIT_BRANCH" MULTI_REPO="$MULTI_REPO" GIT_SLUG="$GIT_SLUG" \
+RESULT=$(QUESTION="$QUESTION" USE_GLOBAL="$USE_GLOBAL" RETRY_COUNT="$RETRY_COUNT" GIT_REPO="$GIT_REPO" GIT_BRANCH="$GIT_BRANCH" MULTI_REPO="$MULTI_REPO" \
   PYTHONPATH="$CODE_UNDERSTANDING_DIR:${PYTHONPATH:-}" \
   python3 - << 'PYEOF'
 import os
@@ -34,7 +33,6 @@ result = run_adhoc_query(
     use_global=os.environ["USE_GLOBAL"] == "1",
     git_repo=os.environ.get("GIT_REPO", ""),
     git_branch=os.environ.get("GIT_BRANCH", "main"),
-    git_slug=os.environ.get("GIT_SLUG", ""),
     multi_repo=os.environ.get("MULTI_REPO", "false").lower() == "true",
 )
 print(result)

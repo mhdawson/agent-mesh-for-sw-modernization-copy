@@ -16,7 +16,7 @@ from fastapi import Cookie, FastAPI, File, HTTPException, Response, UploadFile  
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 from starlette.middleware.body_limit import RequestBodyLimitMiddleware  # noqa: E402
@@ -65,24 +65,6 @@ app.include_router(_v2_queries_router, prefix="/api/v2")
 
 class NamespaceRequest(BaseModel):
     namespace: str
-
-
-class Repo(BaseModel):
-    git_repo: str
-    git_branch: str = "main"
-
-
-class PipelineRequest(BaseModel):
-    repos: list[Repo] = Field(default_factory=list)
-
-
-class QueryRequest(BaseModel):
-    question: str
-    git_repo: str = ""
-    git_branch: str = "main"
-    git_slug: str = ""
-    multi_repo: bool = False
-    use_global: bool | None = None
 
 
 @app.get("/")
@@ -242,65 +224,62 @@ def upload_index(
                 index_storage.cleanup_index_workspace(workspace)
 
 
-@app.get("/api/jobs")
-def get_jobs(
-    cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None),
-) -> dict[str, Any]:
-    try:
-        return {"jobs": cluster.list_recent_jobs(ns=cu_namespace)}
-    except Exception as exc:
-        raise HTTPException(503, str(exc)) from exc
+# ── Dead code – superseded by api/pipelines.py and api/queries.py ─────────────
+
+# class Repo(BaseModel):
+#     git_repo: str
+#     git_branch: str = "main"
+#
+#
+# class PipelineRequest(BaseModel):
+#     repos: list[Repo] = Field(default_factory=list)
+#
+#
+# class QueryRequest(BaseModel):
+#     question: str
+#     git_repo: str = ""
+#     git_branch: str = "main"
+#     use_global: bool | None = None
 
 
-@app.get("/api/jobs/{job_name}")
-def get_job(
-    job_name: str,
-    cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None),
-) -> dict[str, Any]:
-    try:
-        return cluster.job_snapshot(job_name, ns=cu_namespace)
-    except Exception as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.post("/api/pipelines")
-def start_pipeline(
-    body: PipelineRequest,
-    cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None),
-) -> dict[str, str]:
-    repos = [item.model_dump() for item in body.repos]
-    try:
-        return cluster.submit_pipeline_run(repos, ns=cu_namespace)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
-
-
-@app.post("/api/query")
-def start_query(
-    body: QueryRequest,
-    cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None),
-) -> dict[str, str]:
-    try:
-        if body.git_slug:
-            available_uploaded_slugs = {
-                item.get("git_slug")
-                for item in (indexes.list_indexed_repos().get("indexes") or [])
-                if item.get("uploaded") and not item.get("multi_repo")
-            }
-            if body.git_slug not in available_uploaded_slugs:
-                raise ValueError("The selected uploaded index is no longer available.")
-        return cluster.submit_adhoc_query(
-            body.question,
-            git_repo=body.git_repo,
-            git_branch=body.git_branch,
-            git_slug=body.git_slug,
-            multi_repo=body.multi_repo,
-            use_global=body.use_global,
-            ns=cu_namespace,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(500, str(exc)) from exc
+# @app.get("/api/jobs")
+# def get_jobs(cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None)) -> dict[str, Any]:  # noqa: E501
+#     try:
+#         return {"jobs": cluster.list_recent_jobs(runtime_ns=cu_namespace)}
+#     except Exception as exc:
+#         raise HTTPException(503, str(exc)) from exc
+#
+#
+# @app.get("/api/jobs/{job_name}")
+# def get_job(job_name: str, cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None)) -> dict[str, Any]:  # noqa: E501
+#     try:
+#         return cluster.job_snapshot(job_name, runtime_ns=cu_namespace)
+#     except Exception as exc:
+#         raise HTTPException(404, str(exc)) from exc
+#
+#
+# @app.post("/api/pipelines")
+# def start_pipeline(body: PipelineRequest, cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None)) -> dict[str, str]:  # noqa: E501
+#     repos = [item.model_dump() for item in body.repos]
+#     try:
+#         return cluster.submit_pipeline_run(repos, runtime_ns=cu_namespace)
+#     except ValueError as exc:
+#         raise HTTPException(400, str(exc)) from exc
+#     except Exception as exc:
+#         raise HTTPException(500, str(exc)) from exc
+#
+#
+# @app.post("/api/query")
+# def start_query(body: QueryRequest, cu_namespace: str | None = Cookie(alias=NAMESPACE_COOKIE, default=None)) -> dict[str, str]:  # noqa: E501
+#     try:
+#         return cluster.submit_adhoc_query(
+#             body.question,
+#             git_repo=body.git_repo,
+#             git_branch=body.git_branch,
+#             use_global=body.use_global,
+#             runtime_ns=cu_namespace,
+#         )
+#     except ValueError as exc:
+#         raise HTTPException(400, str(exc)) from exc
+#     except Exception as exc:
+#         raise HTTPException(500, str(exc)) from exc

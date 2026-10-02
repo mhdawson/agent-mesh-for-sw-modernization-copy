@@ -194,7 +194,7 @@ def get_parsed_code_metadata(df, language, config=False):
             top_k=1,
         )
 
-        converted_dataset = flow.generate(dataset, max_concurrency=10)
+        converted_dataset = flow.generate(dataset, max_concurrency=1)
 
         converted_df = converted_dataset.to_pandas()
 

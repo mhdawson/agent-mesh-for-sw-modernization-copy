@@ -11,7 +11,7 @@ metadata:
     notebooks.opendatahub.io/inject-auth: "true"
     notebooks.opendatahub.io/last-image-selection: "{{ $datagen_image_stream }}:{{ .Values.dataGeneration.image.tag}}"
     opendatahub.io/image-display-name: {{ .Values.dataGeneration.image.title}}
-    opendatahub.io/workbench-image-namespace: {{ .Values.imageStreams.namespace | quote }}
+    opendatahub.io/workbench-image-namespace: "{{ .Values.namespace }}"
     openshift.io/description: ""
     openshift.io/display-name: {{ .Values.dataGeneration.notebook.name}}
     {{- if .Values.dataGeneration.notebook.mlflowInstance }}
@@ -142,7 +142,7 @@ metadata:
     notebooks.opendatahub.io/inject-auth: "true"
     notebooks.opendatahub.io/last-image-selection: "{{ $graphrag_image_stream }}:{{ .Values.graphrag.image.tag}}"
     opendatahub.io/image-display-name: {{ .Values.graphrag.image.title}}
-    opendatahub.io/workbench-image-namespace: {{ .Values.imageStreams.namespace | quote }}
+    opendatahub.io/workbench-image-namespace: "{{ .Values.namespace }}"
     openshift.io/description: ""
     openshift.io/display-name: {{ .Values.graphrag.notebook.name}}
     {{- if .Values.graphrag.notebook.mlflowInstance }}

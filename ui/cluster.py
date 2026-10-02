@@ -175,11 +175,16 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 git config --global --add safe.directory {WORKSPACE}
-git config --global credential.helper '!f() {{ echo "username=${{GIT_USERNAME}}"; echo "password=${{GIT_TOKEN}}"; }}; f'
+git config --global credential.helper '!f() {{
+  echo "username=${{GIT_USERNAME}}"
+  echo "password=${{GIT_TOKEN}}"
+}}; f'
 rm -rf "{WORKSPACE}"/*
 git -C {WORKSPACE} init -q
-git -C {WORKSPACE} remote add origin "{repo_url}" 2>/dev/null || git -C {WORKSPACE} remote set-url origin "{repo_url}"
-git -C {WORKSPACE} fetch --depth 1 origin "{repo_ref}" || git -C {WORKSPACE} fetch --depth 1 origin main
+git -C {WORKSPACE} remote add origin "{repo_url}" 2>/dev/null ||
+  git -C {WORKSPACE} remote set-url origin "{repo_url}"
+git -C {WORKSPACE} fetch --depth 1 origin "{repo_ref}" ||
+  git -C {WORKSPACE} fetch --depth 1 origin main
 git -C {WORKSPACE} reset --hard FETCH_HEAD
 test -f workflows/examples/code_understanding/scripts/run_adhoc_query.sh
 """.strip()
@@ -296,7 +301,10 @@ def submit_pipeline_run(repos: list[dict[str, str]], ns: str | None = None) -> d
 
     apply_repo_list = ""
     if config_map_name:
-        apply_repo_list = f"mkdir -p $(dirname {REPO_LIST_FILE}) && cp /repo-list/repo_list.json {REPO_LIST_FILE}\n"
+        apply_repo_list = (
+            f"mkdir -p $(dirname {REPO_LIST_FILE}) && "
+            f"cp /repo-list/repo_list.json {REPO_LIST_FILE}\n"
+        )
     command = f"""
 set -euo pipefail
 pip install --quiet 'kfp>=2.0.0,<3.0.0' mlflow
@@ -354,7 +362,9 @@ def submit_adhoc_query(
     repo_url = workflow_repo_url()
     repo_ref = workflow_repo_ref()
     if not repo_url:
-        raise RuntimeError("AGENTMESH_REPO_URL is not set (needed to clone this workflow into the job).")
+        raise RuntimeError(
+            "AGENTMESH_REPO_URL is not set (needed to clone this workflow into the job)."
+        )
 
     if use_global is None:
         use_global = not bool(git_repo or git_slug)
@@ -387,8 +397,10 @@ def submit_adhoc_query(
     command = f"""
 set -euo pipefail
 {git_setup(repo_url, repo_ref)}
-cp /opt/job-scripts/mlflow_asset_loader.py workflows/examples/code_understanding/loaders/mlflow_asset_loader.py
-cp /opt/job-scripts/default_asset_loader.py workflows/examples/code_understanding/loaders/default_asset_loader.py
+cp /opt/job-scripts/mlflow_asset_loader.py \\
+  workflows/examples/code_understanding/loaders/mlflow_asset_loader.py
+cp /opt/job-scripts/default_asset_loader.py \\
+  workflows/examples/code_understanding/loaders/default_asset_loader.py
 workflows/examples/code_understanding/scripts/run_adhoc_query.sh
 """.strip()
 
@@ -427,7 +439,9 @@ def list_recent_jobs(limit: int = 15, ns: str | None = None) -> list[dict[str, s
     jobs = batch.list_namespaced_job(ns, label_selector="app=code-understanding-console")
     items = sorted(
         jobs.items,
-        key=lambda job: job.metadata.creation_timestamp or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda job: (
+            job.metadata.creation_timestamp or datetime.min.replace(tzinfo=timezone.utc)
+        ),
         reverse=True,
     )[:limit]
     rows = []
@@ -452,7 +466,9 @@ def job_pod_name(core: client.CoreV1Api, ns: str, job_name: str) -> str | None:
     if not pods.items:
         return None
     pods.items.sort(
-        key=lambda pod: pod.metadata.creation_timestamp or datetime.min.replace(tzinfo=timezone.utc)
+        key=lambda pod: (
+            pod.metadata.creation_timestamp or datetime.min.replace(tzinfo=timezone.utc)
+        )
     )
     return pods.items[-1].metadata.name
 
@@ -778,8 +794,6 @@ def job_snapshot(job_name: str, ns: str | None = None) -> dict[str, Any]:
         "logs": format_job_logs(logs) if logs else "",
         "answer": answer,
         "summary": (
-            extract_pipeline_summary(logs)
-            if job_name.startswith(PIPELINE_JOB_PREFIX)
-            else {}
+            extract_pipeline_summary(logs) if job_name.startswith(PIPELINE_JOB_PREFIX) else {}
         ),
     }

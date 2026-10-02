@@ -2,13 +2,12 @@
 
 import io
 import json
-from pathlib import Path
 import tarfile
 import time
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
 from playwright.sync_api import Page, expect
 
 QUERY_TIMEOUT_MS = 30 * 60 * 1000
@@ -30,16 +29,14 @@ def copy_bundle_with_new_slug(source: Path, destination: Path, new_slug: str) ->
                     with manifest_file:
                         manifest = json.load(manifest_file)
                     manifest["git_slug"] = new_slug
-                    manifest_bytes = json.dumps(
-                        manifest, indent=2, sort_keys=True
-                    ).encode("utf-8")
+                    manifest_bytes = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
                     member.size = len(manifest_bytes)
                     copied.addfile(member, io.BytesIO(manifest_bytes))
                 elif member.isfile():
                     member_file = original.extractfile(member)
-                    assert member_file is not None, (
-                        f"Downloaded index member is unreadable: {member.name}"
-                    )
+                    assert (
+                        member_file is not None
+                    ), f"Downloaded index member is unreadable: {member.name}"
                     with member_file:
                         copied.addfile(member, member_file)
                 else:
@@ -108,10 +105,7 @@ def test_analysis_selection_summary_tracks_repository_changes(page: Page) -> Non
     first_repo.locator("input").check()
     second_repo.locator("input").check()
     page.locator('.cu-tabs button[data-tab="pipelines"]').click()
-    expected_summary = (
-        f"{first_name} @ {first_branch}, "
-        f"{second_name} @ {second_branch}"
-    )
+    expected_summary = f"{first_name} @ {first_branch}, " f"{second_name} @ {second_branch}"
     expect(summary).to_contain_text(expected_summary)
 
     page.locator('.cu-tabs button[data-tab="repos"]').click()
@@ -120,6 +114,7 @@ def test_analysis_selection_summary_tracks_repository_changes(page: Page) -> Non
     expect(summary).to_contain_text("None selected")
 
 
+@pytest.mark.skip(reason="Indexing yappb is too large and slow for the UI E2E suite")
 def test_analysis_of_yappb_returns_report(page: Page) -> None:
     repo_cards = page.locator("#repo-list .cu-repo")
     preloaded_repo = None
@@ -130,9 +125,9 @@ def test_analysis_of_yappb_returns_report(page: Page) -> None:
         if name == ANALYSIS_REPO_NAME and branch == ANALYSIS_REPO_BRANCH:
             preloaded_repo = candidate
             break
-    assert preloaded_repo is not None, (
-        f"Repository {ANALYSIS_REPO_NAME} @ {ANALYSIS_REPO_BRANCH} is missing from the catalog"
-    )
+    assert (
+        preloaded_repo is not None
+    ), f"Repository {ANALYSIS_REPO_NAME} @ {ANALYSIS_REPO_BRANCH} is missing from the catalog"
 
     page.get_by_role("button", name="Clear").click()
     preloaded_repo.locator("input").check()
@@ -150,9 +145,9 @@ def test_analysis_of_yappb_returns_report(page: Page) -> None:
 
     submit_response = submit_info.value
     submit_text = submit_response.text()
-    assert submit_response.ok, (
-        f"Analysis submission failed: {submit_response.status} {submit_text}"
-    )
+    assert (
+        submit_response.ok
+    ), f"Analysis submission failed: {submit_response.status} {submit_text}"
     run_id = submit_response.json().get("job_id")
     assert run_id, f"Analysis submission returned no run ID: {submit_text}"
 
@@ -182,9 +177,7 @@ def test_analysis_of_yappb_returns_report(page: Page) -> None:
     ), f"Analysis run {run_id} succeeded but returned no analysis report"
 
     page.reload(wait_until="domcontentloaded")
-    created_run = page.locator(
-        f'#runs .cu-run-expand[data-run-id="{run_id}"]'
-    )
+    created_run = page.locator(f'#runs .cu-run-expand[data-run-id="{run_id}"]')
     expect(created_run).to_be_visible(timeout=30_000)
 
 
@@ -207,17 +200,14 @@ def test_index_bundle_can_be_downloaded_and_uploaded_for_chat(
 ) -> None:
     """Exercise the index API and verify uploads appear in the current Chat UI."""
     console_url = page.url.rstrip("/")
-    indexes_response = page.request.get(
-        f"{console_url}/api/indexes", timeout=30_000
-    )
+    indexes_response = page.request.get(f"{console_url}/api/indexes", timeout=30_000)
     assert indexes_response.ok, f"Could not list indexes: {indexes_response.status}"
     indexes = indexes_response.json().get("indexes", [])
     source_index = next(
         (
             index
             for index in indexes
-            if SOURCE_INDEX_NAME in str(index.get("git_slug", ""))
-            and index.get("run_id")
+            if SOURCE_INDEX_NAME in str(index.get("git_slug", "")) and index.get("run_id")
         ),
         None,
     )

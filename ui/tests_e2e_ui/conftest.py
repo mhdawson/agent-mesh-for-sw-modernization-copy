@@ -22,7 +22,9 @@ def require_deployed_console() -> None:
 
     try:
         with urlopen(f"{UI_URL}/api/health", timeout=15) as response:
-            assert response.status == 200, f"Console health endpoint returned HTTP {response.status}"
+            assert (
+                response.status == 200
+            ), f"Console health endpoint returned HTTP {response.status}"
             payload = json.load(response)
     except (HTTPError, URLError, TimeoutError) as exc:
         pytest.fail(f"Console health endpoint is not reachable at {UI_URL}: {exc}")

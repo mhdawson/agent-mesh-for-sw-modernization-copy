@@ -18,7 +18,6 @@ CHART_DIR             ?= resources/helm
 NAMESPACE             ?=
 WAIT_TIMEOUT          ?= 5m
 ADHOC_TIMEOUT         ?= 20m
-WORKBENCH_IMAGESTREAM_NAMESPACE ?= redhat-ods-applications
 # Fall back to origin and the local branch when no upstream is configured.
 GIT_LOCAL_BRANCH    	?= $(shell git branch --show-current 2>/dev/null)
 GIT_REPO_REMOTE     	?= $(or $(shell git config --get "branch.$(GIT_LOCAL_BRANCH).remote" 2>/dev/null),origin)
@@ -34,6 +33,17 @@ PIPELINE_GIT_BRANCH 	?=
 PIPELINE_GIT_REPO_LIST	?=
 DEPLOY_EMBEDDING_MODEL ?= false
 DEPLOY_OTEL            ?= false
+# When false, install assumes the project namespace already exists and is
+# provisioned with its required OpenShift AI metadata by an administrator.
+MANAGE_NAMESPACE       ?= true
+
+ifeq ($(MANAGE_NAMESPACE),true)
+HELM_CREATE_NAMESPACE_ARG := --create-namespace
+else ifeq ($(MANAGE_NAMESPACE),false)
+HELM_CREATE_NAMESPACE_ARG :=
+else
+$(error MANAGE_NAMESPACE must be true or false)
+endif
 
 # Image build/push settings. CI sets REGISTRY and VERSION for its build; when
 # unset, recipes use KFP_IMAGE_REGISTRY and the per-image tags below.
@@ -44,6 +54,7 @@ REGISTRY              ?=
 VERSION               ?=
 
 # Defaults for values omitted from .env and the calling environment.
+AWS_ACCESS_KEY_ID                  ?= aws_storage_userid
 AWS_S3_BUCKET                      ?= data
 GIT_REPO                           ?= https://github.com/agapebondservant/tic-tac-toe-sample
 GIT_BRANCH                         ?= main
@@ -57,6 +68,8 @@ KFP_ANALYSIS_BASE_IMAGE_NAME         ?= agent-mesh-for-sw-modernization-data-ind
 KFP_PIPELINE_TOOLS_IMAGE_NAME        ?= agent-mesh-for-sw-modernization-pipeline-tools
 CONSOLE_APP_IMAGE_NAME               ?= agent-mesh-for-sw-modernization-console-app
 CONSOLE_PLUGIN_IMAGE_NAME            ?= agent-mesh-for-sw-modernization-console-plugin
+# Optional fully qualified OpenShift Route host for the console application.
+CONSOLE_ROUTE_HOST                   ?=
 # Shared fallback for image tags omitted from .env. VERSION overrides these
 # tags for build/push only.
 BASE_VERSION                         ?= v0.1.2
@@ -68,6 +81,7 @@ CONSOLE_IMAGE_TAG                    ?= $(BASE_VERSION)
 ASSET_LOADER                        ?= mlflow
 INSTALL_PREBUILT_INDEX              ?= true
 CUSTOM_EVALUATOR                    ?= mlflow
+MLFLOW_TRACKING_URI                 ?= https://mlflow.redhat-ods-applications.svc.cluster.local:8443
 OTEL_SERVICE_NAME                   ?= code-understanding
 OTEL_NAMESPACE                      ?= $(KFP_NAMESPACE)
 OTEL_EXPORTER_OTLP_ENDPOINT         ?= http://$(OTEL_SERVICE_NAME)-collector.$(OTEL_NAMESPACE).svc.cluster.local:4318
@@ -309,6 +323,7 @@ help-all:
 	@echo "  E2E_UI_PYTHON               Python version for Playwright tests (default: 3.12)"
 	@echo "  DEPLOY_EMBEDDING_MODEL      Deploy e5-mistral during install (default: false)"
 	@echo "  DEPLOY_OTEL                 Deploy OpenTelemetry and Tempo during install (default: false)"
+	@echo "  MANAGE_NAMESPACE           Create namespace and apply metadata (default: true; false for pre-provisioned namespaces)"
 	@echo "  PIPELINE_GIT_REPO           Override the repository used by run-pipelines"
 	@echo "  PIPELINE_GIT_BRANCH         Override the branch used by run-pipelines"
 	@echo "  PIPELINE_GIT_REPO_LIST      Override the repository-list file"
@@ -340,15 +355,24 @@ _install-preflight:
 install: _install-preflight
 	$(MAKE) helm-dependencies
 	@set -e; \
-	\
-	echo "==> Creating namespaces..." && \
-	set -- agent-mesh-for-sw resources/helm \
-		--set "namespace=$(KFP_NAMESPACE)" \
-		--set "requester=$$(oc whoami)"; \
-	if [ "$(DEPLOY_OTEL)" = "true" ] && [ "$(OTEL_NAMESPACE)" != "$(KFP_NAMESPACE)" ]; then \
-		set -- "$$@" --set "otel.namespace=$(OTEL_NAMESPACE)"; \
+	if [ "$(MANAGE_NAMESPACE)" = "false" ] && [ "$(DEPLOY_OTEL)" = "true" ] && \
+	   [ -n "$(OTEL_NAMESPACE)" ] && [ "$(OTEL_NAMESPACE)" != "$(KFP_NAMESPACE)" ]; then \
+		echo "Error: MANAGE_NAMESPACE=false requires the separate OTEL_NAMESPACE to be pre-created too." >&2; \
+		exit 1; \
 	fi; \
-	helm template "$$@" -s templates/namespace.yaml | oc apply -f - && \
+	if [ "$(MANAGE_NAMESPACE)" = "true" ]; then \
+		echo "==> Creating namespaces and applying OpenShift AI metadata..."; \
+		set -- agent-mesh-for-sw resources/helm \
+			--set "namespace=$(KFP_NAMESPACE)" \
+			--set "requester=$$(oc whoami)"; \
+		if [ "$(DEPLOY_OTEL)" = "true" ] && [ "$(OTEL_NAMESPACE)" != "$(KFP_NAMESPACE)" ]; then \
+			set -- "$$@" --set "otel.namespace=$(OTEL_NAMESPACE)"; \
+		fi; \
+		helm template "$$@" -s templates/namespace.yaml | oc apply -f -; \
+	else \
+		echo "==> Skipping namespace creation and metadata apply (MANAGE_NAMESPACE=false)."; \
+		echo "    The target namespace and required OpenShift AI metadata must already exist."; \
+	fi; \
 	\
 	echo "==> Waiting for OpenShift to inject service CA into odh-trusted-ca-bundle..." && \
 	oc wait configmap/odh-trusted-ca-bundle -n "$(KFP_NAMESPACE)" \
@@ -364,7 +388,7 @@ install: _install-preflight
 	[ -n "$(KFP_IMAGE_REGISTRY)" ] || { echo "KFP_IMAGE_REGISTRY must be set" >&2; exit 1; }; \
 	OTEL_ENABLED=false; \
 	set -- $(HELM_UPGRADE_ARGS) \
-		--create-namespace \
+		$(HELM_CREATE_NAMESPACE_ARG) \
 		--set "requester=$$(oc whoami)" \
 		$(HELM_REPO_ARGS) \
 		--set-string "aws-compatible-storage.s3.accessKeyId=$(AWS_ACCESS_KEY_ID)" \
@@ -469,7 +493,7 @@ deploy-embedding-model:
 	@echo "==> Deploying e5-mistral embedding model..." && \
 		helm upgrade --install e5-mistral resources/helm/e5-mistral \
 			--namespace "$(KFP_NAMESPACE)" \
-			--create-namespace && \
+			$(HELM_CREATE_NAMESPACE_ARG) && \
 		echo "==> Waiting for e5-mistral deployment..." && \
 		oc rollout status deployment/e5-mistral -n "$(KFP_NAMESPACE)" \
 			--timeout="$(WAIT_TIMEOUT)"
@@ -852,6 +876,9 @@ upload-mlflow-assets:
 	JOB_EXIT=0; \
 	oc wait job/upload-assets -n "$(KFP_NAMESPACE)" \
 		--for=condition=complete --timeout="$(WAIT_TIMEOUT)" || JOB_EXIT=$$?; \
+	echo "==> MLflow asset upload job logs..."; \
+	oc logs -l job-name=upload-assets -n "$(KFP_NAMESPACE)" \
+		--all-containers=true --prefix=true --timestamps=true || true; \
 	[ "$$JOB_EXIT" -eq 0 ] || { echo "Error: MLflow asset upload failed or timed out." >&2; exit "$$JOB_EXIT"; }
 
 upload-prebuilt-index:
@@ -873,6 +900,9 @@ upload-prebuilt-index:
 	JOB_EXIT=0; \
 	oc wait job/upload-prebuilt-index -n "$(KFP_NAMESPACE)" \
 		--for=condition=complete --timeout="$(WAIT_TIMEOUT)" || JOB_EXIT=$$?; \
+	echo "==> Prebuilt-index upload job logs..."; \
+	oc logs -l job-name=upload-prebuilt-index -n "$(KFP_NAMESPACE)" \
+		--all-containers=true --prefix=true --timestamps=true || true; \
 	[ "$$JOB_EXIT" -eq 0 ] || { echo "Error: prebuilt-index upload failed or timed out." >&2; exit "$$JOB_EXIT"; }
 
 run-adhoc-query:
@@ -1005,7 +1035,8 @@ deploy-console-app:
 		--set console.jobScripts.enabled=true \
 		--set-file console.jobScripts.runPipelines=workflows/examples/code_understanding/scripts/run_pipelines.sh \
 		--set-file console.jobScripts.mlflowAssetLoader=workflows/examples/code_understanding/loaders/mlflow_asset_loader.py \
-		--set-file console.jobScripts.defaultAssetLoader=workflows/examples/code_understanding/loaders/default_asset_loader.py && \
+		--set-file console.jobScripts.defaultAssetLoader=workflows/examples/code_understanding/loaders/default_asset_loader.py \
+		--set-string console.route.host="$(CONSOLE_ROUTE_HOST)" && \
 	oc rollout status deployment/code-understanding-console -n $(KFP_NAMESPACE) --timeout="$(WAIT_TIMEOUT)" && \
 	ROUTE_HOST="$$(oc get route code-understanding-console -n $(KFP_NAMESPACE) -o jsonpath='{.spec.host}')" && \
 	echo "" && \

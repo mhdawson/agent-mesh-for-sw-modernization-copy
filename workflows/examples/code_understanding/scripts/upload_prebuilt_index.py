@@ -150,6 +150,11 @@ def upload_bundle(bundle_path: Path, force: bool = False) -> bool:
     experiment = loader.get_or_create_experiment_by_name(
         client, loader.RESULT_DIRECTORY_ASSET_EXPERIMENT
     )
+    LOG.info(
+        "Target MLflow experiment: %s (id=%s)",
+        experiment.name,
+        experiment.experiment_id,
+    )
 
     if not force and is_bundle_installed(
         client,

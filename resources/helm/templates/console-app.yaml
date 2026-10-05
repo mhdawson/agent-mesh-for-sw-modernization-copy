@@ -98,6 +98,9 @@ metadata:
   annotations:
     haproxy.router.openshift.io/timeout: 30m
 spec:
+  {{- with .Values.console.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
   to:
     kind: Service
     name: code-understanding-console

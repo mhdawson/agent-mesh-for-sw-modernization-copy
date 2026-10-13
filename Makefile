@@ -939,9 +939,14 @@ run-adhoc-query:
 	echo "==> Waiting for query to complete..."; \
 	oc wait "job/run-adhoc-query-$$JOB_ID" -n "$(KFP_NAMESPACE)" \
 		--for=condition=complete --timeout="$(ADHOC_TIMEOUT)" || JOB_EXIT=$$?; \
+	echo "==> Ad-hoc query job logs..."; \
+	LOG_EXIT=0; \
+	oc logs "job/run-adhoc-query-$$JOB_ID" -n "$(KFP_NAMESPACE)" \
+		--all-containers=true || LOG_EXIT=$$?; \
 	oc delete configmap "adhoc-query-$$JOB_ID" -n "$(KFP_NAMESPACE)" --ignore-not-found=true \
 		--wait=true --timeout="$(WAIT_TIMEOUT)" || [ "$$JOB_EXIT" -ne 0 ]; \
 	[ "$$JOB_EXIT" -eq 0 ] || echo "Error: ad-hoc query failed or timed out." >&2; \
+	[ "$$JOB_EXIT" -ne 0 ] || JOB_EXIT=$$LOG_EXIT; \
 	exit "$$JOB_EXIT"
 
 run-pipelines:

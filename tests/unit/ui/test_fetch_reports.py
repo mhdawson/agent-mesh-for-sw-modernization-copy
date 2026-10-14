@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-CU_ROOT = Path(__file__).resolve().parents[2] / "workflows/examples/code_understanding"
+CU_ROOT = Path(__file__).resolve().parents[3] / "workflows/examples/code_understanding"
 if str(CU_ROOT) not in sys.path:
     sys.path.insert(0, str(CU_ROOT))
 

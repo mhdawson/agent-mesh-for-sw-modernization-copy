@@ -119,10 +119,10 @@ SECRET_ENV_VARS := \
 export UI_URL
 
 E2E_UI_PYTHON ?= 3.12
-E2E_UI_REQUIREMENTS ?= ui/tests_e2e_ui/requirements.txt
+E2E_UI_REQUIREMENTS ?= tests/e2e/ui/requirements.txt
 
 E2E_UI_INSTALL_CMD := uv python install $(E2E_UI_PYTHON) && uv run --no-project --python $(E2E_UI_PYTHON) --with-requirements $(E2E_UI_REQUIREMENTS) -- playwright install chromium
-E2E_UI_TEST_CMD    := uv run --no-project --python $(E2E_UI_PYTHON) --with-requirements $(E2E_UI_REQUIREMENTS) -- python -m pytest ui/tests_e2e_ui/ -v --tb=short --browser chromium --output=ui/tests_e2e_ui/test-results --screenshot=on --tracing=retain-on-failure
+E2E_UI_TEST_CMD    := uv run --no-project --python $(E2E_UI_PYTHON) --with-requirements $(E2E_UI_REQUIREMENTS) -- python -m pytest tests/e2e/ui/ -v --tb=short --browser chromium --output=tests/e2e/ui/test-results --screenshot=on --tracing=retain-on-failure
 
 # ============================================================================
 # Container engine
@@ -651,12 +651,12 @@ verify-deploy: verify-secrets
 
 test-ui-unit:
 	@echo "==> Running UI tests..."
-	uv run --project . --group test --frozen pytest ui/tests
+	uv run --project . --group test --frozen pytest tests/unit/ui
 
 test-workflows:
 	@echo "==> Running workflow pipeline tests..."
 	uv run --project . --group test --frozen \
-		pytest tests/workflows
+		pytest tests/unit/workflows
 
 test-all: test-ui-unit test-workflows
 

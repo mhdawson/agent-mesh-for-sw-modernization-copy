@@ -80,7 +80,7 @@ jobs:
         timeout-minutes: 30
         with:
           test_command: "make test-ui"
-          upload_results: "ui/tests_e2e_ui/test-results"
+          upload_results: "tests/e2e/ui/test-results"
         env:
           KFP_NAMESPACE: agent-mesh-for-sw-modernization-ci-project-1
 

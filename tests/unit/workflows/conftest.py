@@ -4,7 +4,7 @@ from types import ModuleType
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_ROOT = REPO_ROOT / "workflows" / "examples" / "code_understanding"
 
 sys.path.insert(0, str(WORKFLOW_ROOT))

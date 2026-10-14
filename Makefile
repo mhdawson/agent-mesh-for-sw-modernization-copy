@@ -92,6 +92,19 @@ MLFLOW_TRACKING_AUTH                ?= kubernetes-namespaced
 MLFLOW_TRACE_ENABLE_OTLP_DUAL_EXPORT ?= true
 OTEL_SEMCONV_STABILITY_OPT_IN       ?= genai
 
+# Local targets always use the external MLflow gateway.
+# Keep discovery lazy and unexported so installation and help do not query Routes.
+LOCAL_MLFLOW_GATEWAY_HOST = $(shell oc get route data-science-gateway -n openshift-ingress --request-timeout=10s -o jsonpath='{.spec.host}' 2>/dev/null)
+local_mlflow_gateway_uri = $(if $(strip $(1)),https://$(strip $(1))/mlflow,$(error Cannot discover the MLflow gateway Route. Log in with oc login and ensure the data-science-gateway Route exists in openshift-ingress))
+LOCAL_MLFLOW_TRACKING_URI = $(call local_mlflow_gateway_uri,$(LOCAL_MLFLOW_GATEWAY_HOST))
+unexport LOCAL_MLFLOW_GATEWAY_HOST LOCAL_MLFLOW_TRACKING_URI local_mlflow_gateway_uri
+
+# Local MLflow index transfer
+INDEX_GIT_SLUG                     ?=
+INDEX_RUN_ID                       ?=
+INDEX_BUNDLE                       ?=
+INDEX_FORCE                        ?= false
+
 SECRET_ENV_VARS := \
 	AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_S3_BUCKET \
 	GIT_USERNAME GIT_TOKEN GIT_REPO GIT_BRANCH GIT_REPO_LIST \
@@ -216,6 +229,10 @@ HELM_UPGRADE_ARGS = agent-mesh-for-sw resources/helm \
 	upload-pipelines \
 	upload-mlflow-assets \
 	upload-prebuilt-index \
+	list-indexes \
+	export-indexes \
+	import-indexes \
+	test-index-transfer \
 	run-adhoc-query \
 	run-pipelines \
 	deploy-otel \
@@ -244,6 +261,9 @@ help:
 	@echo "  install                     Install the complete application stack"
 	@echo "  uninstall                   Remove the application stack and PVC-backed data"
 	@echo "  deploy-otel                 Deploy OpenTelemetry and Tempo resources when available"
+	@echo "  list-indexes                List completed index runs, including combined indexes"
+	@echo "  export-indexes              Download by INDEX_GIT_SLUG (latest) or INDEX_RUN_ID"
+	@echo "  import-indexes              Import a local INDEX_BUNDLE archive"
 	@echo ""
 	@echo "Run 'make help-all' to list all administrative and development tasks."
 
@@ -267,7 +287,12 @@ help-all:
 	@echo "  deploy-otel                 Deploy OpenTelemetry and Tempo resources when enabled"
 	@echo ""
 	@echo "Testing:"
-	@echo "  test-all                    Run all test suites"
+	@echo "  test-all                    Run UI unit, workflow, and index transfer tests"
+	@echo "  test-ui-unit                Run console API and unit tests"
+	@echo "  test-workflows              Run workflow pipeline tests"
+	@echo "  test-index-transfer         Run index transfer tests"
+	@echo "  test-ui-install             Install Playwright and Chromium for UI smoke tests"
+	@echo "  test-ui                     Check the deployed console UI with Playwright"
 	@echo "  helm-dependencies           Download Helm chart dependencies"
 	@echo "  helm-lint                   Lint the deployment chart"
 	@echo "  helm-template               Render the deployment chart"
@@ -299,17 +324,18 @@ help-all:
 	@echo "  upload-pipelines            Upload the Kubeflow pipelines"
 	@echo "  upload-mlflow-assets        Upload MLflow-hosted application assets"
 	@echo "  upload-prebuilt-index       Upload the prebuilt code index"
+	@echo "  list-indexes                List completed indexing runs with IDs and timestamps"
+	@echo "  export-indexes              Export by INDEX_GIT_SLUG or INDEX_RUN_ID (exactly one)"
+	@echo "  import-indexes              Import INDEX_BUNDLE into KFP_NAMESPACE"
 	@echo "  run-adhoc-query             Run an ad hoc code-understanding query"
 	@echo "  run-pipelines               Submit the configured pipeline run"
 	@echo "                              Add --analysis-only to ARGS for a report from an existing index"
 	@echo ""
 	@echo "Console application:"
 	@echo "  apply-console-src           Publish console job scripts"
-	@echo "  run-console-app             Run the console locally with KFP route and MLflow port-forward"
+	@echo "  run-console-app             Run the console locally using KFP and MLflow routes"
 	@echo "  deploy-console-app          Deploy the console application"
 	@echo "  port-forward-console-app    Forward the deployed console to localhost:8080"
-	@echo "  test-ui-install             Install Playwright and Chromium for UI smoke tests"
-	@echo "  test-ui                     Check the deployed console UI with Playwright"
 	@echo ""
 	@echo "OpenShift console plugin:"
 	@echo "  apply-plugin-src            Publish console-plugin job scripts"
@@ -333,6 +359,11 @@ help-all:
 	@echo "  PIPELINE_GIT_BRANCH         Override the branch used by run-pipelines"
 	@echo "  PIPELINE_GIT_REPO_LIST      Override the repository-list file"
 	@echo "  ARGS                        Arguments passed to run-pipelines"
+	@echo "  KFP_NAMESPACE               Namespace used for this project"
+	@echo "  INDEX_GIT_SLUG              Export the latest completed single-repository index"
+	@echo "  INDEX_RUN_ID                Export a specific single or combined index run"
+	@echo "  INDEX_BUNDLE                Optional export output path; required import archive path"
+	@echo "  INDEX_FORCE                 Import an identical archive again (default: false)"
 	@echo "  QUESTION_FILE               Required input file for run-adhoc-query"
 	@echo "  WAIT_TIMEOUT                Resource readiness timeout (default: $(WAIT_TIMEOUT))"
 	@echo "  ADHOC_TIMEOUT               Ad-hoc query timeout (default: $(ADHOC_TIMEOUT))"
@@ -658,7 +689,7 @@ test-workflows:
 	uv run --project . --group test --frozen \
 		pytest tests/unit/workflows
 
-test-all: test-ui-unit test-workflows
+test-all: test-ui-unit test-workflows test-index-transfer
 
 test-ui-install:
 	@echo "==> Installing Playwright and Chromium for UI smoke tests..."
@@ -678,6 +709,10 @@ test-ui:
 	echo "==> Testing console UI at $$UI_URL"; \
 	$(MAKE) test-ui-install; \
 	$(E2E_UI_TEST_CMD)
+
+test-index-transfer:
+	@echo "==> Running index transfer tests..."
+	uv run --project . --group test --frozen pytest tests/unit/index
 
 # ============================================================================
 # Utility commands
@@ -1005,6 +1040,16 @@ run-pipelines:
 		--for=condition=complete --timeout="$(WAIT_TIMEOUT)" || JOB_EXIT=$$?; \
 	[ "$$JOB_EXIT" -eq 0 ] || { echo "Error: pipeline submission failed or timed out." >&2; exit "$$JOB_EXIT"; }
 
+list-indexes:
+	@LOCAL_MLFLOW_TRACKING_URI="$(LOCAL_MLFLOW_TRACKING_URI)" uv run --project . --frozen python workflows/examples/code_understanding/scripts/transfer_index.py list
+
+export-indexes:
+	@LOCAL_MLFLOW_TRACKING_URI="$(LOCAL_MLFLOW_TRACKING_URI)" uv run --quiet --project . --frozen python workflows/examples/code_understanding/scripts/transfer_index.py export
+
+import-indexes:
+	@LOCAL_MLFLOW_TRACKING_URI="$(LOCAL_MLFLOW_TRACKING_URI)" uv run --project . --frozen python workflows/examples/code_understanding/scripts/transfer_index.py import
+
+
 # ============================================================================
 # Observability
 # ============================================================================
@@ -1062,14 +1107,11 @@ run-console-app:
 	export AGENTMESH_REPO_URL="$(GIT_REPO_URL)"; \
 	export AGENTMESH_REPO_REF="$(GIT_REPO_BRANCH)"; \
 	export MLFLOW_WORKSPACE="$$KFP_NAMESPACE"; \
-	export MLFLOW_TRACKING_URI="https://127.0.0.1:18443"; \
-	export MLFLOW_TRACKING_INSECURE_TLS=true; \
-	export MLFLOW_TRACKING_TOKEN="$$(oc whoami --show-token)"; \
+	export MLFLOW_TRACKING_URI="$(LOCAL_MLFLOW_TRACKING_URI)"; \
+	if [ -z "$${MLFLOW_TRACKING_TOKEN:-}" ]; then export MLFLOW_TRACKING_TOKEN="$$(oc whoami --show-token)"; fi; \
 	KFP_ROUTE_HOST="$$(oc get route ds-pipeline-dspa -n "$$KFP_NAMESPACE" -o jsonpath='{.spec.host}')"; \
 	: "$${KFP_ROUTE_HOST:?Could not find the ds-pipeline-dspa route in namespace $$KFP_NAMESPACE}"; \
 	export KFP_HOST="https://$$KFP_ROUTE_HOST"; \
-	oc port-forward --address 127.0.0.1 -n redhat-ods-applications svc/mlflow 18443:8443 & MLFLOW_FORWARD_PID=$$!; \
-	trap 'kill "$$MLFLOW_FORWARD_PID" 2>/dev/null || true' EXIT INT TERM; \
 	uv run --project ui --frozen uvicorn --app-dir ui main:app --host 127.0.0.1 --port 8080
 
 deploy-console-app:

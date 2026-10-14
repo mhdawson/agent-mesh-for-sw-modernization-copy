@@ -2,6 +2,14 @@
 name = "agent-mesh-dev"
 version = "0.1.0"
 requires-python = ">=3.11"
+dependencies = [
+    # Keep the SDK and skinny distributions aligned for native export schema v2.
+    "mlflow[kubernetes]==3.14.0",
+    "mlflow-skinny==3.14.0",
+    # MLflow kubeconfig auth requires the pre-31 authorization token key.
+    "kubernetes==30.1.0",
+    "mlflow-export-import",
+]
 
 [dependency-groups]
 test = [
@@ -11,8 +19,6 @@ test = [
     "jsonpath-ng>=1.7.0",
     "kfp==2.17.0",
     "kfp-kubernetes==2.14.3",
-    "kubernetes>=8.0.0,<31",
-    "mlflow>=2.0.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.40.0",
     "PyGithub>=2.0.0",
     "pydantic>=2.0.0",
@@ -38,3 +44,9 @@ src_paths = ["ui"]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+mlflow-export-import = { git = "https://github.com/mlflow/mlflow-export-import.git", rev = "05ec457fc0b4acfd3cfc24433eaaab5870ac69cd" }
+
+[tool.pytest.ini_options]
+pythonpath = ["workflows/examples"]

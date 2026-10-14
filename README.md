@@ -29,7 +29,8 @@ Analyze legacy code with GraphRAG on Red Hat OpenShift AI to uncover dependencie
   - [9. Analyze your own repositories](#9-analyze-your-own-repositories)
   - [10. Explore the optional console](#10-explore-the-optional-console)
   - [11. What you've accomplished](#11-what-youve-accomplished)
-  - [12. Delete](#12-delete)
+  - [12. Exporting and Importing your indexes (Optional)](#12-exporting-and-importing-your-indexes-optional)
+  - [13. Delete](#13-delete)
 - [Reference](#reference)
   - [How the workflow works](#how-the-workflow-works)
   - [Configuration variables](#configuration-variables)
@@ -421,7 +422,71 @@ stages on a sample repository, examined a migration report, and asked a
 follow-up question grounded in the indexed code. You can now analyze your own
 repository or compare several repositories in one combined index.
 
-### 12. Delete
+### 12. Exporting and Importing your indexes (Optional)
+
+This is an admin task for saving completed MLflow indexes locally so you can
+restore them later without running the indexing pipeline again. You can also
+use the archives to move indexes between projects or clusters. Export any
+indexes you want to keep before deleting the deployment.
+
+The commands use the project configured by `KFP_NAMESPACE` in `.env`. To use
+a different project, add `KFP_NAMESPACE=<project-name>` to the command.
+
+First, list the available indexes and copy the run ID of the index you want
+to export:
+
+```sh
+make list-indexes
+```
+
+Example output:
+
+```text
+Indexes in agent-mesh-demo (1)
+
+Repository / Index                        Type      Uploaded  Latest  Started (UTC)        Run ID
+----------------------------------------  --------  --------  ------  -------------------  --------------------------------
+agapebondservant-tic-tac-toe-sample-main  Single    yes       yes     2026-10-12 19:39:52  21ffb6906aff4646b76dc430f2a2a43b
+```
+
+Export the selected index to a local archive. Replace `<run-id>` with the ID
+from the list. `INDEX_BUNDLE` is the local `.tar.gz` file path: export writes
+the archive there, and import reads it from that path:
+
+```sh
+make export-indexes INDEX_RUN_ID=<run-id> \
+  INDEX_BUNDLE=artifacts/indexes/my-index.tar.gz
+```
+
+Alternatively, export the latest completed single-repository index by its Git
+slug (owner, repository, and branch). If you omit `INDEX_BUNDLE`, export saves
+the archive under `artifacts/indexes/` and prints its path:
+
+```sh
+make export-indexes INDEX_GIT_SLUG=agapebondservant-tic-tac-toe-sample-main
+```
+
+Example output:
+
+```text
+Index:     agapebondservant-tic-tac-toe-sample-main
+Type:      Single repository
+Run ID:    21ffb6906aff4646b76dc430f2a2a43b
+Namespace: agent-mesh-demo
+
+Index saved to "artifacts/indexes/agapebondservant-tic-tac-toe-sample-main-21ffb6906aff4646b76dc430f2a2a43b.tar.gz"
+```
+
+Finally, import the archive into the destination project's MLflow instance:
+
+```sh
+make import-indexes KFP_NAMESPACE=destination-project \
+  INDEX_BUNDLE=artifacts/indexes/my-index.tar.gz
+```
+
+
+
+### 13. Delete
 
 When you have finished, run:
 

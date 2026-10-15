@@ -49,4 +49,4 @@ package = false
 mlflow-export-import = { git = "https://github.com/mlflow/mlflow-export-import.git", rev = "05ec457fc0b4acfd3cfc24433eaaab5870ac69cd" }
 
 [tool.pytest.ini_options]
-pythonpath = ["workflows/examples"]
+pythonpath = [".", "workflows/examples"]

@@ -6,9 +6,33 @@ import pytest
 from playwright.sync_api import Page, expect
 
 QUERY_TIMEOUT_MS = 30 * 60 * 1000
+ANALYSIS_TIMEOUT_MS = 30 * 60 * 1000
 PIPELINE_TIMEOUT_MS = 60 * 60 * 1000
 ANALYSIS_REPO_NAME = "tic-tac-toe-sample"
 ANALYSIS_REPO_BRANCH = "main"
+
+
+def wait_for_analysis_report(page: Page, run_id: str, timeout_ms: int) -> None:
+    run_url = f"{page.url.rstrip('/')}/api/v2/pipelines/runs/{run_id}"
+    deadline = time.monotonic() + timeout_ms / 1000
+    snapshot = {}
+    while time.monotonic() < deadline:
+        run_response = page.request.get(run_url, timeout=30_000)
+        assert (
+            run_response.ok
+        ), f"Could not read analysis run: {run_response.status} {run_response.text()}"
+        snapshot = run_response.json()
+        status = str(snapshot.get("status", "")).lower()
+        if status in {"failed", "cancelled", "canceled", "error"}:
+            pytest.fail(f"Analysis run {run_id} ended with status {status}: {snapshot}")
+        report = snapshot.get("analysis_report")
+        if status == "succeeded" and isinstance(report, str) and report.strip():
+            return
+        time.sleep(15)
+    pytest.fail(
+        f"Analysis run {run_id} returned no successful report within "
+        f"{timeout_ms // 60_000} minutes: {snapshot}"
+    )
 
 
 def test_console_loads_repositories_and_recent_runs(page: Page) -> None:
@@ -23,12 +47,17 @@ def test_console_loads_repositories_and_recent_runs(page: Page) -> None:
 
 def test_tabs_and_repository_selection_work(page: Page) -> None:
     repositories_tab = page.locator('.cu-tabs button[data-tab="repos"]')
-    analysis_tab = page.locator('.cu-tabs button[data-tab="pipelines"]')
+    indexing_tab = page.locator('.cu-tabs button[data-tab="pipelines"]')
+    analysis_tab = page.locator('.cu-tabs button[data-tab="analysis"]')
     chat_tab = page.locator('.cu-tabs button[data-tab="chat"]')
 
     expect(page.locator("#tab-repos")).to_be_visible()
-    analysis_tab.click()
+    indexing_tab.click()
     expect(page.locator("#tab-pipelines")).to_be_visible()
+    expect(page.get_by_role("button", name="Run Indexing")).to_be_visible()
+
+    analysis_tab.click()
+    expect(page.locator("#tab-analysis")).to_be_visible()
     expect(page.get_by_role("button", name="Run Analysis")).to_be_visible()
 
     chat_tab.click()
@@ -52,10 +81,97 @@ def test_tabs_and_repository_selection_work(page: Page) -> None:
     expect(page.locator("#selection-note")).to_contain_text("0 selected")
 
 
-def test_analysis_selection_summary_tracks_repository_changes(page: Page) -> None:
+def test_analysis_offers_the_same_indexed_repositories_as_chat(page: Page) -> None:
+    page.locator('.cu-tabs button[data-tab="analysis"]').click()
+    expect(page.locator("#analysis-loading")).to_be_hidden()
+    assert page.locator("#analysis-repo").inner_html() == page.locator("#chat-repo").inner_html()
+    if page.locator("#analysis-repo option").count():
+        expect(page.locator("#run-analysis")).to_be_enabled()
+    else:
+        expect(page.locator("#analysis-empty")).to_be_visible()
+        expect(page.locator("#run-analysis")).to_be_disabled()
+
+
+def test_analysis_and_chat_keep_independent_selections_after_refresh(page: Page) -> None:
+    page.locator('.cu-tabs button[data-tab="analysis"]').click()
+    expect(page.locator("#analysis-loading")).to_be_hidden()
+    options = page.locator("#analysis-repo option")
+    if options.count() < 2:
+        pytest.skip("Two indexed repositories are needed to check independent selections.")
+
+    analysis_key = options.last.get_attribute("value")
+    chat_key = options.first.get_attribute("value")
+    page.locator("#analysis-repo").select_option(analysis_key)
+    page.locator('.cu-tabs button[data-tab="chat"]').click()
+    page.locator("#chat-repo").select_option(chat_key)
+
+    page.locator('.cu-tabs button[data-tab="repos"]').click()
+    page.get_by_role("button", name="Clear", exact=True).click()
+    page.locator('.cu-tabs button[data-tab="analysis"]').click()
+    expect(page.locator("#analysis-repo")).to_have_value(analysis_key)
+
+    # Refresh through the real console APIs, preserving both dropdown selections.
+    page.evaluate("load()")
+    expect(page.locator("#analysis-repo")).to_have_value(analysis_key)
+    page.locator('.cu-tabs button[data-tab="chat"]').click()
+    expect(page.locator("#chat-repo")).to_have_value(chat_key)
+
+
+@pytest.mark.skip(reason="Indexing is too slow for the UI E2E suite")
+@pytest.mark.parametrize("combined", [False, True], ids=["single-repo", "combined-index"])
+def test_analysis_only_pipeline_returns_report(page: Page, combined: bool) -> None:
+    page.locator('.cu-tabs button[data-tab="analysis"]').click()
+    expect(page.locator("#analysis-loading")).to_be_hidden()
+    repository = page.locator("#analysis-repo")
+    if combined:
+        option = repository.locator('option[value="__multi_repo__"]')
+        if option.count() == 0:
+            pytest.skip("No combined multi-repo index is available in this deployment.")
+        repository.select_option("__multi_repo__")
+        expected_repos = []
+    else:
+        label = f"{ANALYSIS_REPO_NAME} @ {ANALYSIS_REPO_BRANCH}"
+        option = repository.get_by_role("option", name=label, exact=True)
+        expect(option).to_have_count(1)
+        repository.select_option(label=label)
+        git_repo, git_branch = option.get_attribute("value").rsplit("|", 1)
+        expected_repos = [{"git_repo": git_repo, "git_branch": git_branch}]
+
+    with page.expect_response(
+        lambda response: response.url.endswith("/api/v2/pipelines")
+        and response.request.method == "POST",
+        timeout=30_000,
+    ) as submit_info:
+        page.get_by_role("button", name="Run Analysis", exact=True).click()
+
+    response = submit_info.value
+    assert response.request.post_data_json == {
+        "repos": expected_repos,
+        "analysis_only": True,
+        "multi_repo": combined,
+    }
+    assert response.ok, f"Analysis submission failed: {response.status} {response.text()}"
+    run_id = response.json().get("job_id")
+    assert run_id, f"Analysis submission returned no run ID: {response.text()}"
+    assert "_analysis_" in response.json()["run_name"]
+    wait_for_analysis_report(page, run_id, ANALYSIS_TIMEOUT_MS)
+
+    page.reload(wait_until="domcontentloaded")
+    created_run = page.locator(f'#runs .cu-run-expand[data-run-id="{run_id}"]')
+    expect(created_run).to_be_visible(timeout=30_000)
+    created_run.click()
+    expect(page.locator("#tab-analysis")).to_be_visible()
+    expect(page.locator("#report-viewer")).to_be_visible()
+    expect(page.locator("#report-viewer-content")).not_to_be_empty()
+    expect(page.locator("#report-viewer-content")).not_to_contain_text(
+        "No analysis report available."
+    )
+
+
+def test_indexing_selection_summary_tracks_repository_changes(page: Page) -> None:
     repository_cards = page.locator("#repo-list .cu-repo")
     count = repository_cards.count()
-    assert count >= 2, "At least two repositories are needed to check the analysis summary"
+    assert count >= 2, "At least two repositories are needed to check the indexing summary"
 
     first_repo = repository_cards.nth(0)
     second_repo = repository_cards.nth(1)
@@ -83,7 +199,7 @@ def test_analysis_selection_summary_tracks_repository_changes(page: Page) -> Non
 
 
 @pytest.mark.skip(reason="Indexing is too slow for the UI E2E suite")
-def test_analysis_of_tic_tac_toe_returns_report(page: Page) -> None:
+def test_full_pipeline_of_tic_tac_toe_returns_report(page: Page) -> None:
     repo_cards = page.locator("#repo-list .cu-repo")
     preloaded_repo = None
     for index in range(repo_cards.count()):
@@ -109,7 +225,7 @@ def test_analysis_of_tic_tac_toe_returns_report(page: Page) -> None:
         and response.request.method == "POST",
         timeout=30_000,
     ) as submit_info:
-        page.get_by_role("button", name="Run Analysis").click()
+        page.get_by_role("button", name="Run Indexing").click()
 
     submit_response = submit_info.value
     submit_text = submit_response.text()
@@ -119,30 +235,7 @@ def test_analysis_of_tic_tac_toe_returns_report(page: Page) -> None:
     run_id = submit_response.json().get("job_id")
     assert run_id, f"Analysis submission returned no run ID: {submit_text}"
 
-    run_url = f"{page.url.rstrip('/')}/api/v2/pipelines/runs/{run_id}"
-    deadline = time.monotonic() + PIPELINE_TIMEOUT_MS / 1000
-    snapshot = {}
-    while time.monotonic() < deadline:
-        run_response = page.request.get(run_url, timeout=30_000)
-        run_text = run_response.text()
-        assert run_response.ok, f"Could not read analysis run: {run_response.status} {run_text}"
-        snapshot = run_response.json()
-        status = str(snapshot.get("status", "")).lower()
-        if status in {"failed", "cancelled", "error"}:
-            pytest.fail(f"Analysis run {run_id} ended with status {status}: {snapshot}")
-        report = snapshot.get("analysis_report")
-        if status == "succeeded" and isinstance(report, str) and report.strip():
-            break
-        time.sleep(15)
-
-    assert snapshot.get("status") == "succeeded", (
-        f"Analysis run {run_id} did not succeed within {PIPELINE_TIMEOUT_MS // 60_000} minutes: "
-        f"{snapshot}"
-    )
-    analysis_report = snapshot.get("analysis_report")
-    assert (
-        isinstance(analysis_report, str) and analysis_report.strip()
-    ), f"Analysis run {run_id} succeeded but returned no analysis report"
+    wait_for_analysis_report(page, run_id, PIPELINE_TIMEOUT_MS)
 
     page.reload(wait_until="domcontentloaded")
     created_run = page.locator(f'#runs .cu-run-expand[data-run-id="{run_id}"]')
@@ -154,11 +247,12 @@ def test_recent_run_can_open_its_analysis_report(page: Page) -> None:
     if expand_buttons.count() == 0:
         pytest.skip("No successful pipeline runs are available to open.")
 
-    page.locator('.cu-tabs button[data-tab="pipelines"]').click()
+    page.locator('.cu-tabs button[data-tab="chat"]').click()
     expand_buttons.first.click()
 
     report_viewer = page.locator("#report-viewer")
     expect(report_viewer).to_be_visible(timeout=30_000)
+    expect(page.locator("#tab-analysis")).to_be_visible()
     expect(page.locator("#report-viewer-title")).not_to_be_empty()
 
 

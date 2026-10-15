@@ -401,13 +401,21 @@ OpenShift 4.21 or later and cluster-wide console permissions. Deploy it with
 
 ![Console repositories tab](docs/images/console_repositories.png)
 
-The **Repositories** tab shows a list of example repositories to run the analysis on. You can add your own using the input box on the bottom.
+The **Repositories** tab shows a list of example repositories to index and analyze. You can add your own using the input box on the bottom. Select one repository or multiple repositories, then open **Indexing** and click **Run Indexing** to run the full data generation, indexing, and analysis pipeline.
+
+![Console Indexing tab for running the full pipeline](docs/images/console_indexing.png)
 
 #### 10.3 Running analysis and viewing reports
 
-![Console analysis tab](docs/images/console_analysis.png)
+![Console Analysis tab with an indexed repository selected](docs/images/console_analysis.png)
 
-On the left-hand side, you should be able to see the run you just completed under **Recent Runs**. Clicking on the report option will bring you to the **Analysis** tab and display the generated report. You can also use this tab to run analysis on the selected repositories in the **Repositories** tab.
+The **Analysis** tab generates new reports using an existing index. Choose an indexed repository or the **Combined multi-repo index**, then click **Run Analysis**. This skips data generation and indexing. Its repository dropdown has the same options as Chat, and its selection is independent of the Repositories tab.
+
+On the left-hand side, **Recent Runs** shows both full pipeline and analysis-only runs. Clicking on a successful run's report option opens the **Analysis** tab and displays its analysis and evaluation reports. Reports can also be downloaded.
+
+![Console Analysis tab displaying a migration report](docs/images/console_report.png)
+
+If no indexed repositories are available, run the full pipeline from **Indexing** first.
 
 #### 10.4 Chat interface
 

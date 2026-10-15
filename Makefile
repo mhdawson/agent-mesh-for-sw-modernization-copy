@@ -198,6 +198,7 @@ HELM_UPGRADE_ARGS = agent-mesh-for-sw resources/helm \
 	verify-secrets \
 	verify-deploy \
 	test-ui \
+	test-api \
 	test-workflows \
 	test-all \
 	format \
@@ -287,7 +288,8 @@ help-all:
 	@echo "  deploy-otel                 Deploy OpenTelemetry and Tempo resources when enabled"
 	@echo ""
 	@echo "Testing:"
-	@echo "  test-all                    Run UI unit, workflow, and index transfer tests"
+	@echo "  test-all                    Run API, UI unit, workflow, and index transfer tests"
+	@echo "  test-api                    Run API route and service tests"
 	@echo "  test-ui-unit                Run console API and unit tests"
 	@echo "  test-workflows              Run workflow pipeline tests"
 	@echo "  test-index-transfer         Run index transfer tests"
@@ -680,6 +682,10 @@ verify-deploy: verify-secrets
 	fi; \
 	echo "verify-deploy: PASS namespace=$$VERIFY_NAMESPACE release=$(RELEASE)"
 
+test-api:
+	@echo "==> Running API tests..."
+	uv run --project . --group test --frozen pytest tests/unit/api
+
 test-ui-unit:
 	@echo "==> Running UI tests..."
 	uv run --project . --group test --frozen pytest tests/unit/ui
@@ -689,7 +695,7 @@ test-workflows:
 	uv run --project . --group test --frozen \
 		pytest tests/unit/workflows
 
-test-all: test-ui-unit test-workflows test-index-transfer
+test-all: test-api test-ui-unit test-workflows test-index-transfer
 
 test-ui-install:
 	@echo "==> Installing Playwright and Chromium for UI smoke tests..."

@@ -161,8 +161,6 @@ spec:
               value: "{{ .Values.repoRef }}"
             - name: PYTHONUNBUFFERED
               value: "1"
-            - name: INDEX_WORKSPACE_MAX_BYTES
-              value: "{{ .Values.indexWorkspace.maxBytes }}"
           envFrom:
             - secretRef:
                 name: code-understanding-env
@@ -171,8 +169,6 @@ spec:
             - name: serving-cert
               mountPath: /var/serving-cert
               readOnly: true
-            - name: plugin-api-tmp
-              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /api/health
@@ -191,18 +187,13 @@ spec:
             requests:
               cpu: 100m
               memory: 256Mi
-              ephemeral-storage: {{ .Values.indexWorkspace.ephemeralStorage.request }}
             limits:
               cpu: "1"
               memory: 1Gi
-              ephemeral-storage: {{ .Values.indexWorkspace.ephemeralStorage.limit }}
       volumes:
         - name: serving-cert
           secret:
             secretName: code-understanding-plugin-api-cert
-        - name: plugin-api-tmp
-          emptyDir:
-            sizeLimit: {{ .Values.indexWorkspace.ephemeralStorage.limit }}
 ---
 apiVersion: v1
 kind: Service

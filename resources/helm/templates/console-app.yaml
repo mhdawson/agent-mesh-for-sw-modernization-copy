@@ -40,15 +40,10 @@ spec:
               value: "{{ .Values.repoRef }}"
             - name: PYTHONUNBUFFERED
               value: "1"
-            - name: INDEX_WORKSPACE_MAX_BYTES
-              value: "{{ .Values.indexWorkspace.maxBytes }}"
           envFrom:
             - secretRef:
                 name: code-understanding-env
                 optional: true
-          volumeMounts:
-            - name: console-tmp
-              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /api/health
@@ -65,15 +60,9 @@ spec:
             requests:
               cpu: 100m
               memory: 256Mi
-              ephemeral-storage: {{ .Values.indexWorkspace.ephemeralStorage.request }}
             limits:
               cpu: "1"
               memory: 1Gi
-              ephemeral-storage: {{ .Values.indexWorkspace.ephemeralStorage.limit }}
-      volumes:
-        - name: console-tmp
-          emptyDir:
-            sizeLimit: {{ .Values.indexWorkspace.ephemeralStorage.limit }}
 ---
 apiVersion: v1
 kind: Service

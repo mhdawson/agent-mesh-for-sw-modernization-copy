@@ -1,6 +1,8 @@
 import os
 import subprocess
 import sys
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import yaml
 from conftest import REPO_ROOT, WORKFLOW_ROOT
@@ -28,7 +30,34 @@ def collect_task_names(value):
     return task_names
 
 
-def test_all_pipelines_compile(tmp_path):
+def assert_single_repo_component_sets_run_id(executor, monkeypatch):
+    from pipelines.base import indexing
+    from utils import kubeflow_utils
+
+    observed_run_ids = []
+    monkeypatch.setenv("KFP_RUN_ID", "{{$.pipeline_job_uuid}}")
+    monkeypatch.setattr(
+        indexing,
+        "generate_graphrag_index",
+        lambda **kwargs: observed_run_ids.append(os.getenv("KFP_RUN_ID")),
+    )
+    monkeypatch.setattr(kubeflow_utils, "read_from_input_artifact", lambda _: nullcontext("code"))
+    monkeypatch.setattr(kubeflow_utils, "write_to_output_artifact", lambda _: nullcontext("graph"))
+
+    component = {}
+    exec(executor["command"][-1], component)
+    component["graphrag_indexing_op"](
+        codebase_dir=SimpleNamespace(),
+        graphrag_dir=SimpleNamespace(),
+        result=SimpleNamespace(log_metric=lambda *args: None),
+        git_repo="https://github.com/example/one",
+        git_branch="develop",
+        kfp_run_id="55ad44f8-955a-427f-ba30-fd8f3afef7bb",
+    )
+    assert observed_run_ids == ["55ad44f8-955a-427f-ba30-fd8f3afef7bb"]
+
+
+def test_all_pipelines_compile(tmp_path, monkeypatch):
     env = os.environ | {
         "PYTHONPATH": str(WORKFLOW_ROOT),
         "KUBECONFIG": os.devnull,
@@ -115,3 +144,25 @@ def test_all_pipelines_compile(tmp_path):
                 assert report["dependentTasks"] == [indexing]
         if mode == "multi":
             assert "get-repo-list-op" in collect_task_names(document)
+        component_name = (
+            "run-indexing-multi-repo-op" if mode == "multi" else "graphrag-indexing-op"
+        )
+        pipeline_name = f"graphrag-indexing{'-multi-repo' if mode == 'multi' else ''}-pipeline"
+        indexing_component = document["components"][f"comp-{component_name}"]
+        assert indexing_component["inputDefinitions"]["parameters"]["kfp_run_id"] == {
+            "defaultValue": "",
+            "isOptional": True,
+            "parameterType": "STRING",
+        }
+        indexing_task = document["components"][f"comp-{pipeline_name}"]["dag"]["tasks"][
+            component_name
+        ]
+        assert indexing_task["inputs"]["parameters"]["kfp_run_id"] == {
+            "runtimeValue": {"constant": "{{$.pipeline_job_uuid}}"}
+        }
+        executor = document["deploymentSpec"]["executors"][indexing_component["executorLabel"]][
+            "container"
+        ]
+        assert all(env["name"] != "KFP_RUN_ID" for env in executor.get("env", []))
+        if mode == "single":
+            assert_single_repo_component_sets_run_id(executor, monkeypatch)

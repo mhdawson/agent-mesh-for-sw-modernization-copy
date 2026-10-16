@@ -16,9 +16,9 @@ name = "agent-mesh-dev"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "databricks-mlflow-export-import" },
     { name = "kubernetes" },
     { name = "mlflow", extra = ["kubernetes"] },
-    { name = "mlflow-export-import" },
     { name = "mlflow-skinny" },
 ]
 
@@ -45,9 +45,9 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "databricks-mlflow-export-import", specifier = "==1.2.1" },
     { name = "kubernetes", specifier = "==30.1.0" },
     { name = "mlflow", extras = ["kubernetes"], specifier = "==3.14.0" },
-    { name = "mlflow-export-import", git = "https://github.com/mlflow/mlflow-export-import.git?rev=05ec457fc0b4acfd3cfc24433eaaab5870ac69cd" },
     { name = "mlflow-skinny", specifier = "==3.14.0" },
 ]
 
@@ -1143,6 +1143,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c7/6c/ee7a98f22ba6e4d39cdf7f3a7cd9461fcc562625ccbca58d94bf35fe598b/databricks-cli-0.18.0.tar.gz", hash = "sha256:87569709eda9af3e9db8047b691e420b5e980c62ef01675575c0d2b9b4211eb7", size = 95375, upload-time = "2023-10-05T09:36:27.75Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ae/a3/d56f8382c40899301f327d1c881278b09c9b8bc301c2c111633a0346d06e/databricks_cli-0.18.0-py2.py3-none-any.whl", hash = "sha256:1176a5f42d3e8af4abfc915446fb23abc44513e325c436725f5898cbb9e3384b", size = 150329, upload-time = "2023-10-05T09:36:25.745Z" },
+]
+
+[[package]]
+name = "databricks-mlflow-export-import"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "databricks-cli" },
+    { name = "mlflow-skinny", extra = ["databricks"] },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "tabulate" },
+    { name = "wheel" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5d/f3/a481584d083bbf47b895bd201978c5bbeccaa91b624e8b2033706ed06a36/databricks_mlflow_export_import-1.2.1.tar.gz", hash = "sha256:f58d9afb566286a38599b58f9ef504de61e30a7968f53c6540d122d20326f06e", size = 84647, upload-time = "2026-05-31T23:02:53.556Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/cf/96464ce80e20e16490f6dcaadb6e260b83756802c4276f70a8462aaf01f2/databricks_mlflow_export_import-1.2.1-py3-none-any.whl", hash = "sha256:ee8a4a677947bccb348940883dbdb3c5490d18acb5b3ab7addd282b61c3b1006", size = 130049, upload-time = "2026-05-31T23:02:52.434Z" },
 ]
 
 [[package]]
@@ -3147,19 +3164,6 @@ wheels = [
 [package.optional-dependencies]
 kubernetes = [
     { name = "kubernetes" },
-]
-
-[[package]]
-name = "mlflow-export-import"
-version = "1.2.0"
-source = { git = "https://github.com/mlflow/mlflow-export-import.git?rev=05ec457fc0b4acfd3cfc24433eaaab5870ac69cd#05ec457fc0b4acfd3cfc24433eaaab5870ac69cd" }
-dependencies = [
-    { name = "databricks-cli" },
-    { name = "mlflow-skinny", extra = ["databricks"] },
-    { name = "packaging" },
-    { name = "pandas" },
-    { name = "tabulate" },
-    { name = "wheel" },
 ]
 
 [[package]]

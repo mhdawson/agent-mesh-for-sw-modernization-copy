@@ -238,6 +238,11 @@ wrappers/adhoc.sh \
 
 The wrapper prints the answer when the query job completes.
 
+The deployed embedding model works with the prebuilt index. If you use a
+different model, its embeddings must match the `intfloat/e5-mistral-7b-instruct`
+embedding space and 4,096 dimensions. Otherwise,
+[rebuild the index](#7-run-your-first-code-analysis) with your model.
+
 ### 6. Generate a migration report using the prebuilt index
 
 You can generate a migration report from the same prebuilt Tic-Tac-Toe index

@@ -460,7 +460,6 @@ install: _install-preflight
 		$(MAKE) upload-mlflow-assets; \
 	fi
 	@if [ "$(ASSET_LOADER)" = "mlflow" ] && [ "$(INSTALL_PREBUILT_INDEX)" = "true" ]; then \
-		echo "==> Uploading prebuilt index..." && \
 		$(MAKE) upload-prebuilt-index; \
 	fi
 	$(MAKE) upload-pipelines
@@ -955,11 +954,10 @@ upload-mlflow-assets:
 
 upload-prebuilt-index:
 	@set -e; \
-	echo "==> Deleting existing prebuilt-index upload job..."; \
+	echo "==> Uploading prebuilt index..."; \
 	oc delete job upload-prebuilt-index -n "$(KFP_NAMESPACE)" --ignore-not-found=true \
-		--wait=true --timeout="$(WAIT_TIMEOUT)"; \
+		--wait=true --timeout="$(WAIT_TIMEOUT)" >/dev/null; \
 	\
-	echo "==> Submitting prebuilt-index upload job..."; \
 	helm template agent-mesh-for-sw resources/helm \
 		--set namespace="$(KFP_NAMESPACE)" \
 		$(HELM_REPO_ARGS) \
@@ -967,15 +965,17 @@ upload-prebuilt-index:
 		$(HELM_PIPELINE_TOOLS_ARGS) \
 		--set mlflowGatewayHost="$(GATEWAY_HOST)" \
 		--set prebuiltIndex.enabled=true \
-		-s templates/upload-prebuilt-index-job.yaml | oc apply -n "$(KFP_NAMESPACE)" -f -; \
-	echo "==> Waiting for prebuilt-index upload to complete..."; \
+		-s templates/upload-prebuilt-index-job.yaml | oc apply -n "$(KFP_NAMESPACE)" -f - >/dev/null; \
 	JOB_EXIT=0; \
 	oc wait job/upload-prebuilt-index -n "$(KFP_NAMESPACE)" \
-		--for=condition=complete --timeout="$(WAIT_TIMEOUT)" || JOB_EXIT=$$?; \
-	echo "==> Prebuilt-index upload job logs..."; \
-	oc logs -l job-name=upload-prebuilt-index -n "$(KFP_NAMESPACE)" \
-		--all-containers=true --prefix=true --timestamps=true || true; \
-	[ "$$JOB_EXIT" -eq 0 ] || { echo "Error: prebuilt-index upload failed or timed out." >&2; exit "$$JOB_EXIT"; }
+		--for=condition=complete --timeout="$(WAIT_TIMEOUT)" >/dev/null || JOB_EXIT=$$?; \
+	[ "$$JOB_EXIT" -eq 0 ] || { echo "Error: prebuilt-index upload failed or timed out." >&2; exit "$$JOB_EXIT"; }; \
+	JOB_RESULT="$$(oc logs -l job-name=upload-prebuilt-index -n "$(KFP_NAMESPACE)" --tail=1 2>/dev/null || true)"; \
+	case "$$JOB_RESULT" in \
+		*'"outcome": "existing"'*) echo "==> Prebuilt index already installed; skipping." ;; \
+		*'"outcome": "imported"'*) echo "==> Prebuilt index uploaded." ;; \
+		*) echo "==> Prebuilt index upload completed." ;; \
+	esac
 
 run-adhoc-query:
 	@[ -z "$(QUESTION_FILE)" ] && { echo "Error: QUESTION_FILE is required: generate it via wrappers/adhoc.sh." >&2; exit 1; } || true

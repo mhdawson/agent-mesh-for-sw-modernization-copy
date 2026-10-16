@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -18,6 +19,57 @@ from unittest.mock import MagicMock
 import pytest
 from code_understanding.scripts import transfer_index as cli
 from code_understanding.utils import index_transfer as transfer
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PREBUILT_BUNDLE = (
+    REPO_ROOT
+    / "workflows/examples/code_understanding/assets/prebuilt-indexes"
+    / "agapebondservant-tic-tac-toe-sample-main-index.tar.gz"
+)
+
+
+def test_prebuilt_bundle_has_portable_metadata_and_anonymous_tar_headers(tmp_path):
+    transfer._extract_bundle(PREBUILT_BUNDLE, tmp_path, transfer.MAX_BYTES)
+    metadata = transfer._read_metadata(tmp_path)
+    assert set(metadata["system"]) == {
+        "export_file_version",
+        "package_version",
+        "mlflow_version",
+    }
+    info = metadata["mlflow"]["info"]
+    assert set(info) == {
+        "run_id",
+        "experiment_id",
+        "user_id",
+        "status",
+        "lifecycle_stage",
+        "run_name",
+    }
+    assert info["experiment_id"] == "0"
+    assert info["user_id"] == "example"
+    assert info["run_name"] == "tic-tac-toe-prebuilt-index"
+    assert metadata["mlflow"]["tags"] == {
+        "category": "indexing",
+        "git_slug": "agapebondservant-tic-tac-toe-sample-main",
+        "multi_repo": "False",
+        "mlflow.runName": "tic-tac-toe-prebuilt-index",
+    }
+    assert metadata["mlflow"]["params"] == {
+        "embedding_model": "intfloat/e5-mistral-7b-instruct",
+        "embedding_dimensions": "4096",
+    }
+    files = transfer._local_files(tmp_path / "artifacts", transfer.MAX_BYTES)
+    _, _, index_path = transfer._index_identity(metadata["mlflow"]["tags"])
+    transfer._require_index(files, index_path)
+    with tarfile.open(PREBUILT_BUNDLE, "r:gz") as archive:
+        for member in archive:
+            assert (member.uid, member.gid, member.uname, member.gname, member.mtime) == (
+                0,
+                0,
+                "",
+                "",
+                0,
+            )
 
 
 @pytest.fixture(autouse=True)
@@ -430,3 +482,64 @@ def test_real_workspace_round_trip(mlflow_server, tmp_path, combined):
         assert importer.import_index(bundle)["destination_run_id"] == new_id
         forced = importer.import_index(bundle, force=True)
         assert forced["destination_run_id"] != new_id
+
+
+def test_prebuilt_bundle_imports_through_job_cli_and_skips_duplicate(mlflow_server, tmp_path):
+    import mlflow
+    from mlflow.tracking import MlflowClient
+    from mlflow.utils.workspace_context import WorkspaceContext
+
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("MLFLOW_", "LOCAL_MLFLOW_", "INDEX_"))
+    } | {
+        "KFP_NAMESPACE": "destination",
+        "MLFLOW_TRACKING_URI": mlflow_server,
+        # The local test server has no Kubernetes authentication gateway.
+        "MLFLOW_TRACKING_AUTH": "",
+    }
+
+    def run_import():
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "workflows/examples/code_understanding/scripts/transfer_index.py"),
+                "import",
+                "--bundle",
+                str(PREBUILT_BUNDLE),
+            ],
+            cwd=REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert completed.returncode == 0, completed.stderr
+        return json.loads(completed.stdout)
+
+    imported = run_import()
+    assert imported["outcome"] == "imported"
+    mlflow.set_tracking_uri(mlflow_server)
+    client = MlflowClient(tracking_uri=mlflow_server)
+    with WorkspaceContext("destination"):
+        run_id = imported["destination_run_id"]
+        run = client.get_run(run_id)
+        assert run.info.status == "FINISHED"
+        assert client.get_experiment(run.info.experiment_id).name == (
+            "destination" + transfer.EXPERIMENT_SUFFIX
+        )
+        assert run.data.tags["uploaded"] == "true"
+        assert run.data.tags["bundle_sha256"] == transfer.bundle_sha256(PREBUILT_BUNDLE)
+        assert run.data.params["embedding_model"] == "intfloat/e5-mistral-7b-instruct"
+        downloaded = Path(client.download_artifacts(run_id, "", str(tmp_path)))
+        with tarfile.open(PREBUILT_BUNDLE, "r:gz") as archive:
+            for member in archive:
+                if member.isfile() and member.name.startswith("artifacts/"):
+                    relative = member.name.removeprefix("artifacts/")
+                    assert hashlib.sha256((downloaded / relative).read_bytes()).digest() == (
+                        hashlib.sha256(archive.extractfile(member).read()).digest()
+                    )
+        existing = run_import()
+        assert existing["outcome"] == "existing"
+        assert existing["destination_run_id"] == run_id

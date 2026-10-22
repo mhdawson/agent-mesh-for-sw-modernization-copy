@@ -69,7 +69,9 @@ def deployed_mlflow_client(deployed_namespace, run_cli, monkeypatch):
     """Use the external MLflow gateway and the selected deployment's workspace."""
     from mlflow.tracking import MlflowClient
 
-    uri = os.environ.get("LOCAL_MLFLOW_TRACKING_URI", "")
+    uri = os.environ.get("MLFLOW_GATEWAY_URL", "").strip() or os.environ.get(
+        "LOCAL_MLFLOW_TRACKING_URI", ""
+    )
     if not uri:
         host = run_cli(
             [

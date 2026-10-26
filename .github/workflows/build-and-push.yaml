@@ -1,3 +1,4 @@
+# Self-contained image build and publish workflow.
 name: Build and push images
 
 on:
@@ -26,6 +27,12 @@ permissions:
 
 env:
   REGISTRY: quay.io/rh-ai-quickstart
+  IMAGE_REPOSITORIES: >-
+    quay.io/rh-ai-quickstart/agent-mesh-for-sw-modernization-data-generation
+    quay.io/rh-ai-quickstart/agent-mesh-for-sw-modernization-data-indexing
+    quay.io/rh-ai-quickstart/agent-mesh-for-sw-modernization-pipeline-tools
+    quay.io/rh-ai-quickstart/agent-mesh-for-sw-modernization-console-app
+    quay.io/rh-ai-quickstart/agent-mesh-for-sw-modernization-console-plugin
 
 jobs:
   build-and-push:
@@ -36,9 +43,37 @@ jobs:
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.target_branch || github.sha }}
+          fetch-depth: 0
+
+      - name: Check whether image publishing is needed
+        id: image-check
+        env:
+          IMAGE_CHANGE_BASE: ${{ github.event.before }}
+        run: |
+          MAKE_STATUS=0
+          MAKE_DATABASE="$(make -qp 2>/dev/null)" || MAKE_STATUS=$?
+          if [ "${MAKE_STATUS}" -gt 1 ]; then
+            echo "Unable to inspect Makefile targets (make exited ${MAKE_STATUS})." >&2
+            exit "${MAKE_STATUS}"
+          fi
+
+          if grep -Eq '^build-push-images-needed::?([[:space:]]|$)' <<< "${MAKE_DATABASE}"; then
+            echo "Found build-push-images-needed; checking whether images need publishing."
+            if make build-push-images-needed; then
+              echo "Image build and push are needed."
+              echo "needed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Image build and push are not needed; skipping them."
+              echo "needed=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "No build-push-images-needed target found; proceeding with image publishing."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Extract image tags
         id: version
+        if: steps.image-check.outputs.needed == 'true'
         env:
           TARGET_BRANCH: ${{ inputs.target_branch || github.ref_name }}
         run: |
@@ -71,9 +106,11 @@ jobs:
           echo "versions=${VERSIONS}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
+        if: steps.image-check.outputs.needed == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Quay.io
+        if: steps.image-check.outputs.needed == 'true'
         uses: docker/login-action@v3
         with:
           registry: quay.io
@@ -81,17 +118,31 @@ jobs:
           password: ${{ secrets.QUAY_PASSWORD }}
 
       - name: Build all images
+        if: steps.image-check.outputs.needed == 'true'
+        env:
+          VERSIONS: ${{ steps.version.outputs.versions }}
         run: |
-          IFS=' ' read -ra VERSIONS <<< "${{ steps.version.outputs.versions }}"
-          for version in "${VERSIONS[@]}"; do
-            echo "Building images with version: ${version}"
-            VERSION="${version}" make build-all-images
-          done
+          IFS=' ' read -ra VERSIONS <<< "${VERSIONS}"
+          VERSION="${VERSIONS[0]}" REGISTRY="${REGISTRY}" make build-all-images
 
       - name: Push all images
+        if: steps.image-check.outputs.needed == 'true'
+        env:
+          VERSIONS: ${{ steps.version.outputs.versions }}
         run: |
-          IFS=' ' read -ra VERSIONS <<< "${{ steps.version.outputs.versions }}"
-          for version in "${VERSIONS[@]}"; do
-            echo "Pushing images with version: ${version}"
-            VERSION="${version}" make push-all-images
+          IFS=' ' read -ra VERSIONS <<< "${VERSIONS}"
+          VERSION="${VERSIONS[0]}" REGISTRY="${REGISTRY}" make push-all-images
+
+      - name: Tag pushed images
+        if: steps.image-check.outputs.needed == 'true'
+        env:
+          IMAGE_TAGS: ${{ steps.version.outputs.versions }}
+        run: |
+          IFS=' ' read -ra VERSIONS <<< "${IMAGE_TAGS}"
+          PRIMARY_TAG="${VERSIONS[0]}"
+          for IMAGE in ${IMAGE_REPOSITORIES}; do
+            for TAG in "${VERSIONS[@]:1}"; do
+              echo "Tagging ${IMAGE}:${PRIMARY_TAG} as ${IMAGE}:${TAG}"
+              docker buildx imagetools create --tag "${IMAGE}:${TAG}" "${IMAGE}:${PRIMARY_TAG}"
+            done
           done

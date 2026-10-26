@@ -16,6 +16,14 @@ on:
         options:
           - main
           - dev
+      force_build_all:
+        description: Build and publish every image even when the optional Make target says none are needed
+        required: true
+        default: 'FALSE'
+        type: choice
+        options:
+          - 'FALSE'
+          - 'TRUE'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.repository }}-${{ inputs.target_branch || github.ref_name }}
@@ -27,6 +35,7 @@ permissions:
 
 env:
   REGISTRY: quay.io/rh-ai-quickstart
+  FORCE_BUILD_ALL: ${{ inputs.force_build_all || 'FALSE' }}
   IMAGE_REPOSITORIES: >-
     quay.io/rh-ai-quickstart/agent-mesh-for-sw-modernization-data-generation
     quay.io/rh-ai-quickstart/agent-mesh-for-sw-modernization-data-indexing
@@ -59,7 +68,17 @@ jobs:
 
           if grep -Eq '^build-push-images-needed::?([[:space:]]|$)' <<< "${MAKE_DATABASE}"; then
             echo "Found build-push-images-needed; checking whether images need publishing."
+            TARGET_STATUS=0
             if make build-push-images-needed; then
+              TARGET_STATUS=0
+            else
+              TARGET_STATUS=$?
+            fi
+
+            if [ "${FORCE_BUILD_ALL}" = "TRUE" ]; then
+              echo "FORCE_BUILD_ALL=TRUE; building and publishing all images regardless of the optional target result."
+              echo "needed=true" >> "$GITHUB_OUTPUT"
+            elif [ "${TARGET_STATUS}" -eq 0 ]; then
               echo "Image build and push are needed."
               echo "needed=true" >> "$GITHUB_OUTPUT"
             else

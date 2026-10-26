@@ -48,7 +48,7 @@ jobs:
         with:
           repo_url: https://github.com/${{ github.repository }}
           ref: ${{ inputs.branch }}
-          namespace: agent-mesh-for-sw-modernization-ci-project-1
+          namespace: agent-mesh-ci-project-1
           deploy_command: "make install MANAGE_NAMESPACE=false DEPLOY_EMBEDDING_MODEL=true WAIT_TIMEOUT=10m CUSTOM_EVALUATOR=basic"
         env:
           PROD_TOKEN: ${{ secrets.PROD_TOKEN }}
@@ -59,7 +59,7 @@ jobs:
           GRAPHRAG_LLM_API_BASE: ${{ vars.GRAPHRAG_LLM_API_BASE }}
           GRAPHRAG_LLM_PROVIDER: ${{ vars.GRAPHRAG_LLM_PROVIDER }}
           GRAPHRAG_LLM_PROVIDER_SETTINGS_XML: ${{ vars.GRAPHRAG_LLM_PROVIDER_SETTINGS_XML }}
-          KFP_NAMESPACE: agent-mesh-for-sw-modernization-ci-project-1
+          KFP_NAMESPACE: agent-mesh-ci-project-1
 
       - name: Deploy console app
         run: |
@@ -81,7 +81,7 @@ jobs:
         working-directory: ./quickstart
         timeout-minutes: 15
         env:
-          KFP_NAMESPACE: agent-mesh-for-sw-modernization-ci-project-1
+          KFP_NAMESPACE: agent-mesh-ci-project-1
 
       - name: Run CLI and UI E2E tests
         uses: ./.github/actions/run-quickstart-tests
@@ -101,7 +101,7 @@ jobs:
           GRAPHRAG_LLM_PROVIDER_SETTINGS_XML: ${{ vars.GRAPHRAG_LLM_PROVIDER_SETTINGS_XML }}
           DEPLOY_EMBEDDING_MODEL: "true"
           CUSTOM_EVALUATOR: basic
-          KFP_NAMESPACE: agent-mesh-for-sw-modernization-ci-project-1
+          KFP_NAMESPACE: agent-mesh-ci-project-1
 
       - name: Cleanup
         if: always()
@@ -109,4 +109,4 @@ jobs:
         with:
           cleanup_command: "make uninstall"
         env:
-          KFP_NAMESPACE: agent-mesh-for-sw-modernization-ci-project-1
+          KFP_NAMESPACE: agent-mesh-ci-project-1

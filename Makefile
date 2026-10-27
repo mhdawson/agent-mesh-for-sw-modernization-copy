@@ -52,6 +52,8 @@ endif
 CONTAINER_ENGINE      ?= $(if $(CI),docker,podman)
 REGISTRY              ?=
 VERSION               ?=
+# CI provides the push event's before SHA; local and manual runs use HEAD^.
+IMAGE_CHANGE_BASE     ?= $(shell git rev-parse --verify HEAD^ 2>/dev/null)
 
 # Defaults for values omitted from .env and the calling environment.
 AWS_ACCESS_KEY_ID                  ?= aws_storage_userid
@@ -194,6 +196,7 @@ HELM_UPGRADE_ARGS = agent-mesh-for-sw resources/helm \
 .PHONY: \
 	help \
 	help-all \
+	version \
 	helm-dependencies \
 	helm-lint \
 	helm-template \
@@ -218,6 +221,7 @@ HELM_UPGRADE_ARGS = agent-mesh-for-sw resources/helm \
 	apply-secrets \
 	build-images \
 	build-all-images \
+	build-push-images-needed \
 	push-all-images \
 	build-data-generation-image \
 	push-data-generation-image \
@@ -272,6 +276,9 @@ help:
 	@echo "  import-indexes              Import a local INDEX_BUNDLE archive"
 	@echo ""
 	@echo "Run 'make help-all' to list all administrative and development tasks."
+
+version:
+	@echo "$(BASE_VERSION)"
 
 help-all:
 	@echo "Agent Mesh for Software Modernization"
@@ -892,6 +899,32 @@ push-console-plugin-image:
 		IMAGE_TAG_VAR=CONSOLE_IMAGE_TAG
 
 build-images: build-all-images push-all-images
+
+# A nonzero result means no image inputs changed; the publishing workflow uses
+# that status to skip its build and push steps.
+build-push-images-needed:
+	@set -eu; \
+	BASE_REF="$(or $(strip $(IMAGE_CHANGE_BASE)),$(shell git rev-parse --verify HEAD^ 2>/dev/null))"; \
+	if [ -z "$$BASE_REF" ]; then \
+		echo "No image comparison base is available; proceeding with the build."; exit 0; \
+	fi; \
+	if ! git rev-parse --verify "$$BASE_REF^{commit}" >/dev/null 2>&1; then \
+		echo "Cannot resolve image comparison base $$BASE_REF; proceeding with the build."; exit 0; \
+	fi; \
+	if git diff --quiet "$$BASE_REF" HEAD -- \
+		Makefile \
+		resources/images/data-generation \
+		resources/images/data-indexing \
+		resources/images/pipeline-tools \
+		ui api workflows/examples/code_understanding console-plugin .dockerignore; then \
+		echo "No image inputs changed since $$BASE_REF; skipping image build and push."; exit 1; \
+	else \
+		DIFF_STATUS=$$?; \
+		if [ "$$DIFF_STATUS" -eq 1 ]; then \
+			echo "Image inputs changed since $$BASE_REF; building images."; exit 0; \
+		fi; \
+		echo "Unable to compare image inputs (git diff exited $$DIFF_STATUS); proceeding with the build."; exit 0; \
+	fi
 
 build-all-images:
 	@[ -n "$(or $(VERSION),$(CONSOLE_IMAGE_TAG))" ] || { echo "Set VERSION or CONSOLE_IMAGE_TAG to build console images" >&2; exit 1; }

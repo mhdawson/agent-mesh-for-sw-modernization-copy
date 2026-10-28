@@ -679,8 +679,10 @@ helm-export-validate-demo: helm-dependencies
 	trap 'rm -f "$$RENDERED_MANIFESTS"' EXIT; \
 	helm template $(RELEASE) $(CHART_DIR) \
 		--namespace "$$VERIFY_NAMESPACE" \
-		--set-string "namespace=$$VERIFY_NAMESPACE" > "$$RENDERED_MANIFESTS"; \
-	kubeconform -strict -summary -skip DataSciencePipelinesApplication "$$RENDERED_MANIFESTS"
+		--set-string "namespace=$$VERIFY_NAMESPACE" \
+		--set console.enabled=true \
+		--set-string console.image="$(KFP_IMAGE_REGISTRY)/$(CONSOLE_APP_IMAGE_NAME):$(CONSOLE_IMAGE_TAG)" > "$$RENDERED_MANIFESTS"; \
+	kubeconform -strict -summary -skip DataSciencePipelinesApplication,Route "$$RENDERED_MANIFESTS"
 
 verify-secrets:
 	@if git grep -nE '(AWS_SECRET_ACCESS_KEY|GIT_TOKEN|[A-Z0-9_]+_(API_KEY|TOKEN))=[^<[:space:]"$$]' \

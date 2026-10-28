@@ -27,9 +27,7 @@ def read_makefile_base_version(makefile: str, **_: object) -> str:
     return matches[0]
 
 
-def extract_chart_app_version(
-    text: str, *, context_path: str = "", **__: object
-) -> str:
+def extract_chart_app_version(text: str, *, context_path: str = "", **__: object) -> str:
     for line in text.splitlines():
         if line.startswith("appVersion:"):
             rest = line[len("appVersion:") :].strip()
@@ -38,9 +36,7 @@ def extract_chart_app_version(
     sys.exit(f"Could not find appVersion in Chart.yaml{context}")
 
 
-def extract_release_image_tag_anchor(
-    text: str, *, context_path: str = "", **__: object
-) -> str:
+def extract_release_image_tag_anchor(text: str, *, context_path: str = "", **__: object) -> str:
     match = re.search(r'^\s+tag: &releaseImageTag "([^"]+)"', text, flags=re.MULTILINE)
     if match is None:
         context = f" ({context_path})" if context_path else ""
@@ -48,9 +44,7 @@ def extract_release_image_tag_anchor(
     return match.group(1)
 
 
-def extract_bootstrap_image_tag(
-    text: str, *, context_path: str = "", **__: object
-) -> str:
+def extract_bootstrap_image_tag(text: str, *, context_path: str = "", **__: object) -> str:
     match = re.search(r"^(\s+)imageTag:\s*\"([^\"]+)\"", text, flags=re.MULTILINE)
     if match is None:
         context = f" ({context_path})" if context_path else ""
@@ -66,9 +60,7 @@ EXTRACTORS: dict[str, Callable[..., str]] = {
 }
 
 
-def read_manifest_file(
-    relative_path: str, *, git_ref: str | None, repo_root: pathlib.Path
-) -> str:
+def read_manifest_file(relative_path: str, *, git_ref: str | None, repo_root: pathlib.Path) -> str:
     if git_ref is not None:
         completed = subprocess.run(
             ["git", "show", f"{git_ref}:{relative_path}"],
@@ -111,8 +103,7 @@ def load_manifest(path: pathlib.Path) -> dict:
         for path_index, relative_path in enumerate(paths):
             if not isinstance(relative_path, str) or not relative_path.strip():
                 sys.exit(
-                    f"replacements[{index}].paths[{path_index}] "
-                    "must be a non-empty string"
+                    f"replacements[{index}].paths[{path_index}] " "must be a non-empty string"
                 )
     return data
 
@@ -139,9 +130,7 @@ def verify_manifest_alignment(
     for item in data["replacements"]:
         extractor = EXTRACTORS[item["rule"]]
         for relative_path in item["paths"]:
-            text = read_manifest_file(
-                relative_path, git_ref=git_ref, repo_root=repo_root
-            )
+            text = read_manifest_file(relative_path, git_ref=git_ref, repo_root=repo_root)
             found = extractor(text, context_path=relative_path)
             if found != base_version:
                 errors.append(
@@ -210,9 +199,7 @@ def replace_release_image_tag_anchor(text: str, new_version: str, **_: object) -
         flags=re.MULTILINE,
     )
     if count != 1:
-        sys.exit(
-            'Could not find exactly one line matching: tag: &releaseImageTag "..."'
-        )
+        sys.exit('Could not find exactly one line matching: tag: &releaseImageTag "..."')
     return updated
 
 
@@ -322,9 +309,7 @@ def main() -> None:
     if args.version is None:
         parser.error("version is required unless --verify is used")
     new_version = args.version.strip().strip('"').strip("'")
-    if re.fullmatch(
-        r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", new_version
-    ) is None:
+    if re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", new_version) is None:
         sys.exit(
             "Version must be semver (MAJOR.MINOR.PATCH), optionally prefixed with v: "
             f"{new_version}"
@@ -337,17 +322,13 @@ def main() -> None:
         for relative_path in item["paths"]:
             path = ROOT / relative_path
             if not path.is_file():
-                sys.exit(
-                    f"Manifest path does not exist or is not a file: {relative_path}"
-                )
+                sys.exit(f"Manifest path does not exist or is not a file: {relative_path}")
             text = path.read_text(encoding="utf-8")
             updated = replacement(text, new_version, context_path=path)
             updates.append((path, updated))
 
     changed = [
-        (path, updated)
-        for path, updated in updates
-        if updated != path.read_text(encoding="utf-8")
+        (path, updated) for path, updated in updates if updated != path.read_text(encoding="utf-8")
     ]
     if args.dry_run:
         for path, _ in changed:

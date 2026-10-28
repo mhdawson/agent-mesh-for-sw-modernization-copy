@@ -137,6 +137,8 @@ E2E_UI_PYTHON ?= 3.12
 E2E_UI_REQUIREMENTS ?= tests/e2e/ui/requirements.txt
 RUN_PIPELINES ?= false
 E2E_PIPELINE_ARGS = $(if $(filter true,$(RUN_PIPELINES)),--run-pipelines,)
+PYTHON_VERSION ?= 3.11
+UV_VERSION ?= 0.12.11
 
 E2E_UI_INSTALL_CMD := uv python install $(E2E_UI_PYTHON) && uv run --no-project --python $(E2E_UI_PYTHON) --with-requirements $(E2E_UI_REQUIREMENTS) -- playwright install chromium
 E2E_UI_TEST_CMD    := uv run --no-project --python $(E2E_UI_PYTHON) --with-requirements $(E2E_UI_REQUIREMENTS) -- python -m pytest tests/e2e/ui/ -v --tb=short --browser chromium --output=tests/e2e/ui/test-results --screenshot=on --tracing=retain-on-failure
@@ -202,6 +204,10 @@ HELM_UPGRADE_ARGS = agent-mesh-for-sw resources/helm \
 	helm-template \
 	verify-secrets \
 	verify-deploy \
+	check-uv-version \
+	check-lockfiles \
+	deps-all \
+	helm-export-validate-demo \
 	test-ui-e2e \
 	test-api \
 	test-playwright \
@@ -642,6 +648,18 @@ apply-secrets:
 # Testing
 # ============================================================================
 
+check-uv-version:
+	@uv --version | grep -q "$(UV_VERSION)" || \
+		(echo "ERROR: uv $(UV_VERSION) is required, but a different version is installed." >&2; exit 1)
+
+check-lockfiles:
+	uv lock --project . --check
+	uv lock --project ui --check
+
+deps-all:
+	uv sync --project . --python $(PYTHON_VERSION) --all-groups --frozen
+	uv sync --project ui --python $(PYTHON_VERSION) --frozen
+
 helm-dependencies:
 	helm dependency update $(CHART_DIR)
 
@@ -653,6 +671,18 @@ helm-template: helm-dependencies
 	helm template $(RELEASE) $(CHART_DIR) \
 		--namespace "$$VERIFY_NAMESPACE" \
 		--set-string "namespace=$$VERIFY_NAMESPACE"
+
+helm-export-validate-demo: helm-dependencies
+	@set -eu; \
+	VERIFY_NAMESPACE=ci-demo; \
+	RENDERED_MANIFESTS="$$(mktemp "$${TMPDIR:-/tmp}/agent-mesh-rendered.XXXXXX.yaml")"; \
+	trap 'rm -f "$$RENDERED_MANIFESTS"' EXIT; \
+	helm template $(RELEASE) $(CHART_DIR) \
+		--namespace "$$VERIFY_NAMESPACE" \
+		--set-string "namespace=$$VERIFY_NAMESPACE" \
+		--set console.enabled=true \
+		--set-string console.image="$(KFP_IMAGE_REGISTRY)/$(CONSOLE_APP_IMAGE_NAME):$(CONSOLE_IMAGE_TAG)" > "$$RENDERED_MANIFESTS"; \
+	kubeconform -strict -summary -skip DataSciencePipelinesApplication,Route "$$RENDERED_MANIFESTS"
 
 verify-secrets:
 	@if git grep -nE '(AWS_SECRET_ACCESS_KEY|GIT_TOKEN|[A-Z0-9_]+_(API_KEY|TOKEN))=[^<[:space:]"$$]' \

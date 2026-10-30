@@ -22,19 +22,11 @@ jobs:
     name: Create version bump PR
     runs-on: ubuntu-latest
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.PR_CREATION_APP_ID }}
-          private-key: ${{ secrets.PR_CREATION_APP_PRIVATE_KEY }}
-
       - name: Check out dev
         uses: actions/checkout@v5
         with:
           ref: dev
           fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Bump release version
         id: version
@@ -123,7 +115,7 @@ jobs:
       - name: Create or update version bump PR
         if: steps.version.outputs.has-changes == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.branch.outputs.name }}
           CURRENT_VERSION: ${{ steps.version.outputs.current-version }}
           NEW_VERSION: ${{ steps.version.outputs.new-version }}
@@ -136,7 +128,8 @@ jobs:
           {
             echo "## Summary"
             echo
-            echo "This PR increments the dev version from `$CURRENT_VERSION` to `$NEW_VERSION`."
+            printf 'This PR increments the dev version from `%s` to `%s`.\n' \
+              "$CURRENT_VERSION" "$NEW_VERSION"
             echo
             echo "## Files updated"
             echo
